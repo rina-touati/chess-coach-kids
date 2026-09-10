@@ -53,6 +53,12 @@ type PracticePuzzle = {
 }
 
 const fallbackKidName = 'אלוף'
+const apiBaseUrl = window.location.hostname === 'rina-touati.github.io' ? 'https://chess-coach-kids-one.vercel.app' : ''
+
+function apiUrl(path: string) {
+  return `${apiBaseUrl}${path}`
+}
+
 const skillLabels: Record<SkillKey, string> = {
   opening: 'פתיחה',
   tactics: 'טקטיקה',
@@ -307,8 +313,9 @@ async function speakWithServerVoice(text: string) {
   const timeout = window.setTimeout(() => controller.abort(), 9000)
 
   try {
-    const response = await fetch('/api/speech', {
+    const response = await fetch(apiUrl('/api/speech'), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
       signal: controller.signal,
@@ -638,8 +645,9 @@ function moveFromUci(chess: Chess, uci: string | null) {
 }
 
 async function fetchStockfishAnalysis(chess: Chess, skillLevel: number, movetime = 350) {
-  const response = await fetch('/api/stockfish', {
+  const response = await fetch(apiUrl('/api/stockfish'), {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fen: chess.fen(),
@@ -685,7 +693,7 @@ function App() {
 
     async function loadProfile() {
       try {
-        const response = await fetch('/api/profile')
+        const response = await fetch(apiUrl('/api/profile'), { credentials: 'include' })
         if (!response.ok) throw new Error('Profile fetch failed')
         const data = (await response.json()) as { profile?: unknown }
         if (!isMounted) return
@@ -748,8 +756,9 @@ function App() {
     setCoach(thinkingMessage)
 
     try {
-      const response = await fetch('/api/coach', {
+      const response = await fetch(apiUrl('/api/coach'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event,
@@ -797,8 +806,9 @@ function App() {
 
     setIsSavingName(true)
     try {
-      const response = await fetch('/api/profile', {
+      const response = await fetch(apiUrl('/api/profile'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ displayName }),
       })
@@ -844,8 +854,9 @@ function App() {
         ? bestBeforeMove.score - playedAnalysis.score
         : 0
     try {
-      const response = await fetch('/api/coach', {
+      const response = await fetch(apiUrl('/api/coach'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event: 'move',
@@ -933,8 +944,9 @@ function App() {
     setCoach(thinkingMessage)
 
     try {
-      const response = await fetch('/api/coach', {
+      const response = await fetch(apiUrl('/api/coach'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event: 'chat',
@@ -980,8 +992,9 @@ function App() {
 
   async function recordPracticeProgress(puzzle: PracticePuzzle) {
     try {
-      const response = await fetch('/api/practice', {
+      const response = await fetch(apiUrl('/api/practice'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           puzzleId: puzzle.id,

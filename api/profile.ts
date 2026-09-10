@@ -2,6 +2,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   getSupabaseClient,
+  handleCorsPreflight,
   parseJsonBody,
   parseProfileCookie,
   serializeProfileCookie,
@@ -45,6 +46,7 @@ async function getExistingProfile(auth: ChessProfileCookie) {
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setJsonHeaders(res)
+  if (handleCorsPreflight(req, res)) return
 
   try {
     const supabase = getSupabaseClient()

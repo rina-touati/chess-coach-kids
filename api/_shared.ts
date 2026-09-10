@@ -66,10 +66,20 @@ export function parseProfileCookie(cookieHeader: string | undefined): ChessProfi
 
 export function serializeProfileCookie(profile: ChessProfileCookie) {
   const value = encodeURIComponent(`${profile.childProfileId}.${profile.accessToken}`)
-  return `${profileCookieName}=${value}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`
+  return `${profileCookieName}=${value}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=None`
 }
 
 export function setJsonHeaders(res: { setHeader(name: string, value: string | string[]): void }) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Access-Control-Allow-Origin', 'https://rina-touati.github.io')
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+}
+
+export function handleCorsPreflight(req: { method?: string }, res: { status(code: number): ApiResponse; send(body: unknown): void }) {
+  if (req.method !== 'OPTIONS') return false
+  res.status(204).send('')
+  return true
 }

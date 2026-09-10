@@ -4,6 +4,7 @@ import {
   type ApiResponse,
   getRequiredEnv,
   getSupabaseClient,
+  handleCorsPreflight,
   parseJsonBody,
   parseProfileCookie,
   serializeProfileCookie,
@@ -339,6 +340,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setJsonHeaders(res)
+  if (handleCorsPreflight(req, res)) return
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })

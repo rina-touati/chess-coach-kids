@@ -2,6 +2,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   getSupabaseClient,
+  handleCorsPreflight,
   parseJsonBody,
   parseProfileCookie,
   setJsonHeaders,
@@ -49,6 +50,7 @@ const skillLabels = {
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setJsonHeaders(res)
+  if (handleCorsPreflight(req, res)) return
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })

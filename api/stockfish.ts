@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { type ApiRequest, type ApiResponse, parseJsonBody, setJsonHeaders } from './_shared.js'
+import { type ApiRequest, type ApiResponse, handleCorsPreflight, parseJsonBody, setJsonHeaders } from './_shared.js'
 
 type StockfishEngine = {
   listener?: (line: string) => void
@@ -113,6 +113,7 @@ async function analyzePosition(fen: string, movetime: number, skillLevel: number
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setJsonHeaders(res)
+  if (handleCorsPreflight(req, res)) return
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })

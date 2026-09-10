@@ -1,11 +1,14 @@
 import OpenAI from 'openai'
-import { type ApiRequest, type ApiResponse, getRequiredEnv, parseJsonBody } from './_shared.js'
+import { type ApiRequest, type ApiResponse, getRequiredEnv, handleCorsPreflight, parseJsonBody, setJsonHeaders } from './_shared.js'
 
 type SpeechRequest = {
   text?: string
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
+  setJsonHeaders(res)
+  if (handleCorsPreflight(req, res)) return
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return
@@ -30,7 +33,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const arrayBuffer = await speech.arrayBuffer()
     res.setHeader('Content-Type', 'audio/mpeg')
-    res.setHeader('Cache-Control', 'no-store')
     res.status(200).send(Buffer.from(arrayBuffer))
   } catch (error) {
     res.status(500).json({
