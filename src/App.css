@@ -24,6 +24,15 @@
   padding: 26px;
 }
 
+.setup-shell {
+  grid-template-columns: minmax(280px, 520px);
+  grid-template-rows: auto;
+}
+
+.setup-panel {
+  width: 100%;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #2563eb;
@@ -74,6 +83,58 @@ h1 {
 .speech-bubble.idea {
   background: #dbeafe;
   border: 2px solid #3b82f6;
+}
+
+.name-form,
+.inline-name-form {
+  display: grid;
+  gap: 10px;
+}
+
+.name-form label,
+.inline-name-form label {
+  color: #475569;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.name-form input,
+.inline-name-form input {
+  width: 100%;
+  min-height: 52px;
+  box-sizing: border-box;
+  border: 2px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 14px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.name-form input:focus,
+.inline-name-form input:focus {
+  outline: 3px solid #bfdbfe;
+  border-color: #2563eb;
+}
+
+.inline-name-form {
+  grid-template-columns: 78px 1fr auto;
+  align-items: end;
+}
+
+.inline-name-form button {
+  min-width: 74px;
+  min-height: 52px;
+  padding: 0 14px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
 }
 
 .controls {
@@ -137,7 +198,7 @@ button.listening {
 .parent-panel {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
   gap: 12px;
   align-items: center;
   padding: 14px;
@@ -184,6 +245,10 @@ button.listening {
   .speech-bubble {
     min-height: auto;
     font-size: 20px;
+  }
+
+  .inline-name-form {
+    grid-template-columns: 1fr;
   }
 
   .board-wrap {

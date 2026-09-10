@@ -2,7 +2,7 @@
 
 A first MVP for a Hebrew voice-first chess coach for young kids.
 
-Live site: https://rina-touati.github.io/chess-coach-kids/
+Live site: https://chess-coach-kids-one.vercel.app/
 
 ## What is included
 
@@ -10,10 +10,11 @@ Live site: https://rina-touati.github.io/chess-coach-kids/
 - Legal move validation with `chess.js`.
 - Automatic black moves.
 - Short Hebrew coaching messages.
-- Browser text-to-speech for spoken feedback.
+- OpenAI-backed spoken coaching with browser voice fallback.
+- Supabase child profiles with name, games, moves, and skill memory.
 - Hint button with board highlights.
 - Small parent status panel.
-- GitHub Pages deployment through GitHub Actions.
+- Vercel deployment for API routes and private environment variables.
 
 ## Local development
 

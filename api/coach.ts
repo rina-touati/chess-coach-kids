@@ -18,6 +18,7 @@ type CoachRequest = {
   pgn: string
   moveCount: number
   gameId?: string
+  childName?: string
   transcript?: string
   move?: {
     from: string
@@ -31,6 +32,7 @@ type CoachRequest = {
     bestScore?: number
     playedScore?: number
     loss?: number
+    safetyPenalty?: number
     scoreLabel?: string
   }
   gameStatus?: {
@@ -55,9 +57,67 @@ type CoachResponse = {
   source: 'openai' | 'fallback'
 }
 
+const skillLabels = {
+  opening: 'פיתוח כלים בפתיחה',
+  tactics: 'טקטיקה ואיומים',
+  safety: 'שמירה על כלים',
+  endgame: 'סיום משחק ומט',
+  focus: 'ריכוז לפני מסע',
+} as const
+
 function clampSkill(value: unknown) {
   const numberValue = typeof value === 'number' ? value : 50
   return Math.max(1, Math.min(100, Math.round(numberValue)))
+}
+
+function getWeakestSkill(scores: Record<string, number>) {
+  return Object.entries(scores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'focus'
+}
+
+function buildTrainingFocus(body: CoachRequest) {
+  const loss = body.analysis?.loss ?? 0
+  const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
+  const tags: string[] = []
+
+  if (body.gameStatus?.isCheckmate) tags.push('checkmate')
+  if (body.gameStatus?.isCheck) tags.push('check')
+  if (loss > 500) tags.push('big_blunder')
+  else if (loss > 150) tags.push('inaccuracy')
+  if (safetyPenalty > 250) tags.push('piece_safety')
+  if (body.move?.san?.includes('x')) tags.push('capture')
+  if (body.move?.san?.includes('+')) tags.push('tactic')
+  if ((body.moveCount ?? 0) <= 8) tags.push('opening')
+  if ((body.moveCount ?? 0) >= 22) tags.push('endgame')
+
+  let topic = 'focus' as keyof typeof skillLabels
+  let nextQuestion = 'מה היריב מאיים לעשות עכשיו?'
+
+  if (body.gameStatus?.isCheckmate) {
+    topic = 'endgame'
+    nextQuestion = 'אילו משבצות בריחה נשארו למלך?'
+  } else if (safetyPenalty > 250) {
+    topic = 'safety'
+    nextQuestion = 'האם הכלי שעבר יכול להיאכל בחינם?'
+  } else if (loss > 500 || body.move?.san?.includes('+') || body.move?.san?.includes('x')) {
+    topic = 'tactics'
+    nextQuestion = 'האם יש שח, לקיחה או איום חזק יותר?'
+  } else if ((body.moveCount ?? 0) <= 8) {
+    topic = 'opening'
+    nextQuestion = 'איזה סוס או רץ עדיין צריך לצאת למשחק?'
+  } else if ((body.moveCount ?? 0) >= 22) {
+    topic = 'endgame'
+    nextQuestion = 'איך מקרבים את המלך או יוצרים איום מט?'
+  }
+
+  return {
+    topic,
+    topicLabel: skillLabels[topic],
+    tags,
+    nextQuestion,
+    bestMove: body.analysis?.bestMove ?? null,
+    playedMove: body.analysis?.playedMove ?? null,
+    loss,
+  }
 }
 
 function updateSkillScores(current: Record<string, unknown>, body: CoachRequest) {
@@ -71,10 +131,18 @@ function updateSkillScores(current: Record<string, unknown>, body: CoachRequest)
 
   const loss = body.analysis?.loss ?? 0
   const moveText = `${body.move?.from ?? ''}${body.move?.to ?? ''}`
+  const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
+
+  if (body.gameStatus?.isCheckmate && body.gameStatus.winner === 'black') {
+    next.endgame -= 4
+    next.safety -= 3
+    next.focus -= 3
+  }
 
   if (loss > 250) {
     next.focus -= 3
     next.safety -= 2
+    next.tactics -= 2
   } else if (loss > 120) {
     next.focus -= 1
   } else if (body.event === 'move') {
@@ -83,6 +151,10 @@ function updateSkillScores(current: Record<string, unknown>, body: CoachRequest)
 
   if (/^[b-g][18][a-h][1-8]$/.test(moveText)) {
     next.opening += 1
+  }
+
+  if (safetyPenalty > 250) {
+    next.safety -= 3
   }
 
   if (body.move?.san?.includes('x') || body.move?.san?.includes('+')) {
@@ -155,16 +227,18 @@ function isCleanHebrewCoachText(text: string) {
 
 function getForcedGameStatusMessage(body: CoachRequest): CoachResponse | null {
   if (body.gameStatus?.isCheckmate) {
+    const name = cleanCoachName(body.childName) || 'אלוף'
+
     if (body.gameStatus.winner === 'white') {
       return {
-        text: 'זה מט. הלבן ניצח. מעולה, המלך השחור כבר לא יכול לברוח.',
+        text: `${name}, זה מט. הלבן ניצח. המלך השחור כבר לא יכול לברוח.`,
         mood: 'good',
         source: 'fallback',
       }
     }
 
     return {
-      text: 'זה מט. השחור ניצח הפעם. בוא נבדוק איך המלך נשאר בלי בריחה.',
+      text: `${name}, זה מט. השחור ניצח הפעם. נבדוק איך המלך נשאר בלי בריחה.`,
       mood: 'careful',
       source: 'fallback',
     }
@@ -181,12 +255,17 @@ function getForcedGameStatusMessage(body: CoachRequest): CoachResponse | null {
   return null
 }
 
+function cleanCoachName(name: unknown) {
+  return typeof name === 'string' ? name.trim().slice(0, 40) : ''
+}
+
 async function generateCoachMessage(body: CoachRequest, profile: Record<string, unknown>): Promise<CoachResponse> {
   const forcedMessage = getForcedGameStatusMessage(body)
   if (forcedMessage) return forcedMessage
 
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
   const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
+  const trainingFocus = buildTrainingFocus(body)
 
   const response = await openai.responses.create({
     model,
@@ -194,16 +273,18 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Avoid generic phrases like "think about a move to win"; give one concrete reason from the current board, the move, the threat, or the analysis. If event is chat, answer the child question directly using the current position.',
+          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Avoid generic praise and avoid phrases like "think about a move to win". For every move, be practical: say what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great" or "well done"; be kind but direct. If event is chat, answer the child question directly using the current position.',
       },
       {
         role: 'user',
         content: JSON.stringify({
           childProfile: {
+            name: profile.display_name,
             level: profile.level,
             skill_scores: profile.skill_scores,
             summary: profile.summary,
           },
+          trainingFocus,
           gameEvent: body,
           requiredJsonShape: {
             text: 'Hebrew spoken feedback',
@@ -250,12 +331,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         ? (profile.skill_scores as Record<string, unknown>)
         : {}
     const skillScores = updateSkillScores(currentScores, body)
+    const trainingFocus = buildTrainingFocus(body)
+    const weakestSkill = getWeakestSkill(skillScores as Record<string, number>)
     const profilePatch = {
       skill_scores: skillScores,
       summary: {
         last_event: body.event,
         last_feedback: coach.text,
         last_score_label: body.analysis?.scoreLabel ?? null,
+        last_training_focus: trainingFocus,
+        weakest_skill: weakestSkill,
+        weakest_skill_label: skillLabels[weakestSkill as keyof typeof skillLabels] ?? 'ריכוז לפני מסע',
         updated_at: new Date().toISOString(),
       },
     }
@@ -271,7 +357,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         san: body.move.san,
         fen_after: body.fen,
         pgn: body.pgn,
-        analysis: body.analysis ?? {},
+        status: body.gameStatus?.isCheckmate || body.gameStatus?.isDraw ? 'completed' : 'active',
+        result: body.gameStatus?.isCheckmate
+          ? body.gameStatus.winner === 'white'
+            ? 'white_win'
+            : 'black_win'
+          : body.gameStatus?.isDraw
+            ? 'draw'
+            : null,
+        analysis: {
+          ...(body.analysis ?? {}),
+          trainingFocus,
+          gameStatus: body.gameStatus ?? {},
+        },
         coach_feedback: {
           text: coach.text,
           mood: coach.mood,

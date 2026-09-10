@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
 import { Lightbulb, Mic, RefreshCcw, RotateCcw, Volume2 } from 'lucide-react'
@@ -11,7 +11,24 @@ type CoachMessage = {
   mood: CoachMood
 }
 
-const kidName = 'אלוף'
+type ChildProfile = {
+  childProfileId?: string
+  displayName?: string
+  level?: number
+  skillScores?: Record<string, number>
+  summary?: {
+    weakest_skill_label?: string
+    last_training_focus?: {
+      topicLabel?: string
+      nextQuestion?: string
+    }
+    [key: string]: unknown
+  }
+  gamesPlayed?: number
+  movesRecorded?: number
+}
+
+const fallbackKidName = 'אלוף'
 const centerSquares = new Set(['c3', 'd3', 'e3', 'f3', 'c4', 'd4', 'e4', 'f4', 'c5', 'd5', 'e5', 'f5', 'c6', 'd6', 'e6', 'f6'])
 const startingBackRank = new Set(['b1', 'c1', 'f1', 'g1'])
 const pieceValues = {
@@ -335,11 +352,17 @@ function explainMoveReason(move: Move) {
   return 'כי זה משפר את המקום של הכלי'
 }
 
-function getCoachMessage(move: Move, chess: Chess, bestBeforeMove: MoveAnalysis | undefined, playedAnalysis: MoveAnalysis | undefined): CoachMessage {
+function getCoachMessage(
+  move: Move,
+  chess: Chess,
+  bestBeforeMove: MoveAnalysis | undefined,
+  playedAnalysis: MoveAnalysis | undefined,
+  childName: string,
+): CoachMessage {
   if (chess.isCheckmate()) {
     return {
       mood: 'good',
-      text: `וואו ${kidName}! זה מט. ניצחת במשחק.`,
+      text: `וואו ${childName}! זה מט. ניצחת במשחק.`,
     }
   }
 
@@ -409,16 +432,16 @@ function getCoachMessage(move: Move, chess: Chess, bestBeforeMove: MoveAnalysis 
   }
 }
 
-function getGameOverMessage(chess: Chess): CoachMessage | null {
+function getGameOverMessage(chess: Chess, childName: string): CoachMessage | null {
   if (chess.isCheckmate()) {
     return chess.turn() === 'w'
       ? {
           mood: 'careful',
-          text: 'זה מט. השחור ניצח הפעם. בוא נבדוק איך המלך נשאר בלי בריחה.',
+          text: `${childName}, זה מט. השחור ניצח הפעם. בוא נבדוק איך המלך נשאר בלי בריחה.`,
         }
       : {
           mood: 'good',
-          text: `וואו ${kidName}! זה מט. ניצחת במשחק.`,
+          text: `וואו ${childName}! זה מט. ניצחת במשחק.`,
         }
   }
 
@@ -464,16 +487,53 @@ function getHint(chess: Chess) {
 }
 
 function App() {
+  const [profile, setProfile] = useState<ChildProfile | null>(null)
+  const [isProfileReady, setIsProfileReady] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [isSavingName, setIsSavingName] = useState(false)
   const [game, setGame] = useState(() => new Chess())
   const [coach, setCoach] = useState<CoachMessage>({
     mood: 'idea',
-    text: 'שלום אלוף. תזיז כלי לבן, ואני אלמד אותך תוך כדי משחק.',
+    text: 'שלום. קודם נגיד לי איך קוראים לילד, ואז נתחיל להתאמן.',
   })
   const [highlightedSquares, setHighlightedSquares] = useState<Record<string, React.CSSProperties>>({})
   const [movesPlayed, setMovesPlayed] = useState(0)
   const [lastMove, setLastMove] = useState<string>('עוד לא התחיל')
   const [cloudGameId, setCloudGameId] = useState<string | undefined>()
   const [isListening, setIsListening] = useState(false)
+  const childName = profile?.displayName?.trim() || fallbackKidName
+  const currentTrainingTopic = profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? 'עוד לא נאסף מספיק מידע'
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadProfile() {
+      try {
+        const response = await fetch('/api/profile')
+        if (!response.ok) throw new Error('Profile fetch failed')
+        const data = (await response.json()) as { profile?: ChildProfile | null }
+        if (!isMounted) return
+
+        if (data.profile?.displayName) {
+          setProfile(data.profile)
+          setNameDraft(data.profile.displayName)
+          setCoach({
+            mood: 'idea',
+            text: `שלום ${data.profile.displayName}. תזיז כלי לבן, ואני אלמד אותך תוך כדי משחק.`,
+          })
+        }
+      } catch {
+        // The setup form stays available if the profile cannot be loaded.
+      } finally {
+        if (isMounted) setIsProfileReady(true)
+      }
+    }
+
+    void loadProfile()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const status = useMemo(() => {
     if (game.isCheckmate()) return game.turn() === 'w' ? 'השחור ניצח' : 'הלבן ניצח'
@@ -482,9 +542,51 @@ function App() {
     return game.turn() === 'w' ? 'התור של הלבן' : 'התור של השחור'
   }, [game])
 
+  function applyProfileUpdate(nextProfile: unknown) {
+    if (!nextProfile || typeof nextProfile !== 'object') return
+    const profileCandidate = nextProfile as ChildProfile
+    setProfile((current) => ({
+      ...(current ?? {}),
+      ...profileCandidate,
+    }))
+    if (profileCandidate.displayName) setNameDraft(profileCandidate.displayName)
+  }
+
   function updateCoach(message: CoachMessage) {
     setCoach(message)
     speak(message.text)
+  }
+
+  async function saveChildName(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const displayName = nameDraft.trim()
+    if (!displayName) return
+
+    setIsSavingName(true)
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName }),
+      })
+
+      if (!response.ok) throw new Error('Profile save failed')
+      const data = (await response.json()) as { profile?: ChildProfile }
+      if (data.profile) {
+        setProfile(data.profile)
+        updateCoach({
+          mood: 'idea',
+          text: `שלום ${data.profile.displayName ?? displayName}. מתחילים להתאמן. קודם נבדוק מה היריב מאיים לקחת.`,
+        })
+      }
+    } catch {
+      updateCoach({
+        mood: 'careful',
+        text: 'לא הצלחתי לשמור את השם עכשיו. נסה שוב בעוד רגע.',
+      })
+    } finally {
+      setIsSavingName(false)
+    }
   }
 
   async function updateCoachFromCloud(
@@ -501,6 +603,13 @@ function App() {
       bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
         ? bestBeforeMove.score - playedAnalysis.score
         : 0
+    let fallbackWasSpoken = false
+    const fallbackTimer = lockLocalMessage
+      ? undefined
+      : window.setTimeout(() => {
+          fallbackWasSpoken = true
+          updateCoach(fallbackMessage)
+        }, 1600)
 
     try {
       const response = await fetch('/api/coach', {
@@ -513,6 +622,7 @@ function App() {
           pgn: nextGame.pgn(),
           moveCount: nextMoveCount,
           gameId: cloudGameId,
+          childName,
           move: {
             from: playerMove.from,
             to: playerMove.to,
@@ -525,6 +635,7 @@ function App() {
             bestScore: bestBeforeMove?.score,
             playedScore: playedAnalysis?.score,
             loss,
+            safetyPenalty: playedAnalysis?.safetyPenalty,
             scoreLabel: formatScore(evaluateBoard(nextGame)),
           },
           gameStatus: {
@@ -544,23 +655,36 @@ function App() {
         }),
       })
 
-      if (!response.ok) return
+      if (!response.ok) throw new Error('Coach API failed')
 
-      const cloudMessage = (await response.json()) as Partial<CoachMessage>
+      const cloudMessage = (await response.json()) as Partial<CoachMessage> & { profile?: unknown }
+      if (fallbackTimer) window.clearTimeout(fallbackTimer)
       const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
       if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
+      applyProfileUpdate(cloudMessage.profile)
       if (lockLocalMessage) return
-      if (typeof cloudMessage.text !== 'string') return
+      if (typeof cloudMessage.text !== 'string') {
+        if (!fallbackWasSpoken) updateCoach(fallbackMessage)
+        return
+      }
 
-      updateCoach({
+      const nextCoach = {
         text: cloudMessage.text,
         mood:
           cloudMessage.mood === 'good' || cloudMessage.mood === 'careful' || cloudMessage.mood === 'idea'
             ? cloudMessage.mood
             : fallbackMessage.mood,
-      })
+      }
+
+      if (fallbackWasSpoken) {
+        setCoach(nextCoach)
+      } else {
+        updateCoach(nextCoach)
+      }
     } catch {
-      // The local coach already spoke, so network failures can stay quiet.
+      if (!lockLocalMessage && !fallbackWasSpoken) updateCoach(fallbackMessage)
+    } finally {
+      if (fallbackTimer) window.clearTimeout(fallbackTimer)
     }
   }
 
@@ -586,6 +710,7 @@ function App() {
           pgn: game.pgn(),
           moveCount: movesPlayed,
           gameId: cloudGameId,
+          childName,
           analysis: {
             scoreLabel: formatScore(evaluateBoard(game)),
           },
@@ -602,8 +727,9 @@ function App() {
 
       if (!response.ok) throw new Error('Coach chat failed')
 
-      const answer = (await response.json()) as Partial<CoachMessage> & { gameId?: string }
+      const answer = (await response.json()) as Partial<CoachMessage> & { gameId?: string; profile?: unknown }
       if (answer.gameId) setCloudGameId(answer.gameId)
+      applyProfileUpdate(answer.profile)
       if (typeof answer.text === 'string') {
         updateCoach({
           text: answer.text,
@@ -686,7 +812,7 @@ function App() {
       [playerMove.to]: { background: '#86efac' },
     })
 
-    let message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis)
+    let message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis, childName)
     let blackMove: Move | null = null
 
     if (!nextGame.isGameOver()) {
@@ -697,7 +823,7 @@ function App() {
       }
     }
 
-    const terminalMessage = getGameOverMessage(nextGame)
+    const terminalMessage = getGameOverMessage(nextGame, childName)
     let lockLocalMessage = Boolean(terminalMessage)
     if (terminalMessage) {
       message = terminalMessage
@@ -707,7 +833,11 @@ function App() {
     }
 
     setGame(nextGame)
-    updateCoach(message)
+    if (lockLocalMessage) {
+      updateCoach(message)
+    } else {
+      setCoach(message)
+    }
     void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage)
     return true
   }
@@ -728,8 +858,55 @@ function App() {
     setHighlightedSquares({})
     updateCoach({
       mood: 'idea',
-      text: 'מתחילים משחק חדש. קודם כל, נסה להוציא סוס או רץ למרכז.',
+      text: `${childName}, מתחילים משחק חדש. קודם כל, נסה להוציא סוס או רץ למרכז.`,
     })
+  }
+
+  if (!isProfileReady) {
+    return (
+      <main className="app-shell setup-shell" dir="rtl">
+        <section className="coach-panel setup-panel" aria-label="טעינת פרופיל">
+          <p className="eyebrow">מאמן שחמט קולי לילדים</p>
+          <h1>טוען את המאמן</h1>
+          <div className="speech-bubble idea">
+            <Volume2 aria-hidden="true" />
+            <p>בודק אם כבר יש פרופיל שמור לילד.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (!profile?.displayName) {
+    return (
+      <main className="app-shell setup-shell" dir="rtl">
+        <section className="coach-panel setup-panel" aria-label="הרשמה למאמן שחמט">
+          <div>
+            <p className="eyebrow">מאמן שחמט קולי לילדים</p>
+            <h1>איך קוראים לילד?</h1>
+          </div>
+          <form className="name-form" onSubmit={saveChildName}>
+            <label htmlFor="child-name">שם הילד</label>
+            <input
+              id="child-name"
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              maxLength={40}
+              autoComplete="given-name"
+              autoFocus
+              placeholder="לדוגמה: נועם"
+            />
+            <button type="submit" disabled={isSavingName || !nameDraft.trim()}>
+              {isSavingName ? 'שומר' : 'מתחילים'}
+            </button>
+          </form>
+          <div className="speech-bubble idea">
+            <Volume2 aria-hidden="true" />
+            <p>אחרי שנשמור שם, המאמן יפנה אליו בשם ויתחיל לבנות זיכרון למידה.</p>
+          </div>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -739,6 +916,13 @@ function App() {
           <p className="eyebrow">מאמן שחמט קולי לילדים</p>
           <h1>שחמט עם מאמן מדבר</h1>
         </div>
+        <form className="inline-name-form" onSubmit={saveChildName}>
+          <label htmlFor="active-child-name">שם הילד</label>
+          <input id="active-child-name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength={40} />
+          <button type="submit" disabled={isSavingName || !nameDraft.trim()}>
+            שמור
+          </button>
+        </form>
 
         <div className={`speech-bubble ${coach.mood}`}>
           <Volume2 aria-hidden="true" />
@@ -799,6 +983,10 @@ function App() {
         <div>
           <span>מסע אחרון</span>
           <strong>{lastMove}</strong>
+        </div>
+        <div>
+          <span>נושא אימון</span>
+          <strong>{currentTrainingTopic}</strong>
         </div>
         <button type="button" onClick={resetGame}>
           <RotateCcw aria-hidden="true" />
