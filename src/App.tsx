@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
-import { BarChart3, Lightbulb, Mic, Play, RefreshCcw, RotateCcw, Target, Volume2 } from 'lucide-react'
+import { BarChart3, Lightbulb, Mic, Play, RotateCcw, Target, Volume2 } from 'lucide-react'
 import './App.css'
 
 type CoachMood = 'good' | 'careful' | 'idea'
@@ -90,9 +90,9 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
     parentNote: 'משחק חופשי נועד לבדוק החלטות אמיתיות של הילד, לא להוביל אותו יד ביד.',
   },
   tactics: {
-    title: 'תרגול מט',
-    question: 'מצא שח שמסיים את המשחק.',
-    parentNote: 'תרגול צריך להיות בעיה אמיתית: הילד מנסה למצוא מט, מקבל רמז רק אם צריך, ואז שומע למה זה עבד.',
+    title: 'שיעור טקטיקה',
+    question: 'מצא רעיון שמכריח את היריב להגיב.',
+    parentNote: 'שיעור טוב נותן לילד לנסות לבד, ואז מסביר למה הרעיון עובד או למה המסע לא נכון.',
   },
   safety: {
     title: 'שומרים על הכלים',
@@ -102,7 +102,7 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
   endgame: {
     title: 'מט וסיום',
     question: 'לאן המלך יכול לברוח?',
-    parentNote: 'בתרגולי מט הילד לומד לסגור בריחות, לא רק להזיז כלי למשבצת נכונה.',
+    parentNote: 'בשיעורי מט הילד לומד לסגור בריחות, להבין מי שומר על מי, ואז להשתמש בזה במשחק אמיתי.',
   },
   focus: {
     title: 'עוצרים לפני המסע',
@@ -114,7 +114,7 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
 const practicePuzzles: PracticePuzzle[] = [
   {
     id: 'mate-one-queen-bishop',
-    title: 'מט באחד: מלכה ורץ',
+    title: 'שיעור מט: סוגרים בריחה',
     level: 'starter',
     skill: 'endgame',
     goal: 'מחפשים מסע אחד שסוגר למלך את כל הבריחות.',
@@ -124,7 +124,7 @@ const practicePuzzles: PracticePuzzle[] = [
   },
   {
     id: 'scholars-mate-finish',
-    title: 'מט באחד: מלכת בית ספר',
+    title: 'שיעור מט: נקודת חולשה',
     level: 'starter',
     skill: 'tactics',
     goal: 'המלכה והרץ מסתכלים יחד על נקודת חולשה ליד המלך.',
@@ -134,7 +134,7 @@ const practicePuzzles: PracticePuzzle[] = [
   },
   {
     id: 'back-rank-rook-mate',
-    title: 'מט באחד: שורה אחורית',
+    title: 'שיעור מט: שורה אחרונה',
     level: 'starter',
     skill: 'tactics',
     goal: 'המלך תקוע מאחורי הרגלים שלו. מצא שח שאין ממנו בריחה.',
@@ -144,7 +144,7 @@ const practicePuzzles: PracticePuzzle[] = [
   },
   {
     id: 'ladder-rook-mate',
-    title: 'מט באחד: סולם',
+    title: 'שיעור מט: סולם',
     level: 'starter',
     skill: 'endgame',
     goal: 'שני צריחים עובדים יחד ודוחפים את המלך לקצה.',
@@ -154,7 +154,7 @@ const practicePuzzles: PracticePuzzle[] = [
   },
   {
     id: 'queen-king-corner-mate',
-    title: 'מט באחד: מלכה ומלך',
+    title: 'שיעור מט: המלך עוזר',
     level: 'starter',
     skill: 'endgame',
     goal: 'המלך שלך עוזר למלכה לסגור את הפינה.',
@@ -164,7 +164,7 @@ const practicePuzzles: PracticePuzzle[] = [
   },
   {
     id: 'mate-two-queen-bishop',
-    title: 'מצא מט בשני שלבים',
+    title: 'שיעור מט: שני שלבים',
     level: 'starter',
     skill: 'tactics',
     goal: 'קודם נותנים שח שמכריח את המלך לזוז, ואז מוצאים מט.',
@@ -172,6 +172,26 @@ const practicePuzzles: PracticePuzzle[] = [
     firstMove: { from: 'h5', to: 'f7' },
     completion: 'mate-after-reply',
     forcedReply: 'Kh8',
+  },
+  {
+    id: 'safety-free-queen',
+    title: 'שיעור: כלי לא מוגן',
+    level: 'starter',
+    skill: 'safety',
+    goal: 'מצא כלי של היריב שאפשר לקחת בלי להפסיד כלי בחזרה.',
+    fen: '4k3/8/8/8/4q3/8/4Q3/4K3 w - - 0 1',
+    firstMove: { from: 'e2', to: 'e4' },
+    completion: 'after-first',
+  },
+  {
+    id: 'focus-stop-check',
+    title: 'שיעור: קודם יוצאים משח',
+    level: 'starter',
+    skill: 'focus',
+    goal: 'המלך בשח. לפני כל רעיון אחר חייבים למצוא משבצת בטוחה למלך.',
+    fen: '4k3/8/8/8/8/8/4r3/4K3 w - - 0 1',
+    firstMove: { from: 'e1', to: 'd1' },
+    completion: 'after-first',
   },
 ]
 
@@ -692,6 +712,41 @@ function getPracticeHint(puzzle: PracticePuzzle, stage: number, childName: strin
   return `${childName}, רמז קטן: עצור ושאל מה היריב מאיים.`
 }
 
+function getWrongLessonMoveMessage(puzzle: PracticePuzzle, gameAfterMove: Chess, playerMove: Move, childName: string) {
+  const isMateLesson = puzzle.title.includes('מט') || puzzle.id.includes('mate')
+
+  if (isMateLesson) {
+    if (!gameAfterMove.isCheck()) {
+      return `${childName}, המסע חוקי, אבל הוא לא נותן שח. במט חייבים קודם לשים את המלך היריב בשח.`
+    }
+
+    const replies = gameAfterMove.moves({ verbose: true })
+    if (replies.length > 0) {
+      return `${childName}, זה שח, אבל עוד לא מט. למלך עדיין יש ${replies.length} תגובות חוקיות, אז צריך מסע שסוגר את כל הבריחות.`
+    }
+
+    return `${childName}, זה נראה כמו שח חזק, אבל הוא לא מתאים למטרת השיעור הזה. בדוק מי שומר על המשבצות סביב המלך.`
+  }
+
+  if (puzzle.skill === 'safety') {
+    if (!playerMove.captured) {
+      return `${childName}, המסע חוקי, אבל בשיעור הזה מחפשים כלי לא מוגן שאפשר לקחת. חפש כלי שחור בלי שומר.`
+    }
+
+    return `${childName}, לקחת כלי, אבל זה לא הכלי שהשיעור בודק. שאל אם אחרי הלקיחה הכלי שלך נשאר בטוח.`
+  }
+
+  if (puzzle.skill === 'focus') {
+    return `${childName}, יצאת עם מסע חוקי, אבל בשיעור הזה בודקים קודם מה האיום הכי דחוף על המלך. חפש את המשבצת הכי בטוחה.`
+  }
+
+  if (puzzle.skill === 'opening') {
+    return `${childName}, המסע חוקי, אבל שיעור פתיחה בודק שליטה במרכז ופיתוח כלים. חפש מסע שעושה אחד משניהם.`
+  }
+
+  return `${childName}, המסע חוקי, אבל הוא לא פותר את מטרת השיעור. עצור ושאל: מה הרעיון שהעמדה מבקשת ממני למצוא?`
+}
+
 function mergeDefinedProfile(current: ChildProfile | null, next: ChildProfile) {
   const merged: ChildProfile = { ...(current ?? {}) }
 
@@ -758,8 +813,12 @@ function App() {
   const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
   const boardFocusSkill = getBoardFocusSkill(game, movesPlayed)
   const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlans[boardFocusSkill]
-  const currentTrainingTopic =
-    activePuzzle?.puzzle.title ?? activePracticePlan.title
+  const activeTrainingTitle = activePuzzle?.puzzle.title ?? activePracticePlan.title
+  const activeTrainingQuestion = activePuzzle?.puzzle.goal ?? activePracticePlan.question
+  const activeParentNote = activePuzzle
+    ? 'שיעור פעיל: הילד מנסה לפתור לבד, הרמז עוזר בהדרגה, והמאמן מסביר אחרי המסע.'
+    : activePracticePlan.parentNote
+  const currentTrainingTopic = activeTrainingTitle
   const practiceProgress = profile?.summary?.practice_progress ?? {}
   const solvedPracticeCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
 
@@ -779,7 +838,7 @@ function App() {
           setNameDraft(loadedProfile.displayName)
           setCoach({
             mood: 'idea',
-            text: `${loadedProfile.displayName}, שלום. אפשר להתחיל משחק או לבחור תרגול קצר.`,
+            text: `${loadedProfile.displayName}, שלום. אפשר להתחיל משחק חופשי או שיעור קצר לפי הרמה שלך.`,
           })
         }
       } catch {
@@ -801,7 +860,7 @@ function App() {
     if (game.isCheck()) return 'שח'
     return game.turn() === 'w' ? 'התור של הלבן' : 'התור של השחור'
   }, [game])
-  const statusLabel = activePuzzle ? 'תרגול פעיל' : lastMove.includes('שיעור הושלם') ? 'שיעור הושלם' : status
+  const statusLabel = activePuzzle ? 'שיעור פעיל' : lastMove.includes('שיעור הושלם') ? 'שיעור הושלם' : status
 
   function applyProfileUpdate(nextProfile: unknown) {
     const profileCandidate = normalizeProfilePayload(nextProfile)
@@ -897,7 +956,7 @@ function App() {
         setProfile(savedProfile)
         void requestContextCoach(
           'onboarding',
-          `${savedProfile.displayName ?? displayName}, ברוך הבא למאמן השחמט. אפשר להתחיל משחק או תרגול קצר.`,
+          `${savedProfile.displayName ?? displayName}, ברוך הבא למאמן השחמט. אפשר להתחיל משחק חופשי או שיעור קצר לפי הרמה שלך.`,
           savedProfile.displayName ?? displayName,
         )
       }
@@ -1096,9 +1155,9 @@ function App() {
     setGame(puzzleGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
-    setLastMove(`תרגול: ${puzzle.title}`)
+    setLastMove(`שיעור: ${puzzle.title}`)
     setHighlightedSquares({})
-    void requestContextCoach('practice', `${childName}, תרגול ${puzzle.title}. ${puzzle.goal} ${practicePlans[puzzle.skill].question}`, childName, puzzleGame, 0, {
+    void requestContextCoach('practice', `${childName}, שיעור ${puzzle.title}. ${puzzle.goal} נסה קודם לבד, ואם צריך לחץ רמז.`, childName, puzzleGame, 0, {
       practice: getPracticeCoachContext(puzzle, 0),
     })
   }
@@ -1133,7 +1192,7 @@ function App() {
     } catch {
       updateCoach({
         mood: 'careful',
-        text: 'זה לא מסע חוקי בפאזל. נסה שוב.',
+        text: 'זה לא מסע חוקי. נסה כלי אחר או משבצת אחרת.',
       })
       return false
     }
@@ -1144,8 +1203,13 @@ function App() {
       const isExpectedStepMove = playerMove.from === step.move.from && playerMove.to === step.move.to
 
       if (!isExpectedStepMove) {
-        void requestContextCoach('practice', `${childName}, זה מסע חוקי, אבל הוא לא פותר את השלב הזה בשיעור.`, childName, game, movesPlayed, {
-          practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
+        setHighlightedSquares({
+          [playerMove.from]: { background: '#fecaca' },
+          [playerMove.to]: { background: '#fca5a5' },
+        })
+        updateCoach({
+          mood: 'careful',
+          text: getWrongLessonMoveMessage(activePuzzle.puzzle, nextGame, playerMove, childName),
         })
         return false
       }
@@ -1177,8 +1241,13 @@ function App() {
       const isExpectedFirstMove = playerMove.from === expectedMove.from && playerMove.to === expectedMove.to
 
       if (!isExpectedFirstMove) {
-        void requestContextCoach('practice', `${childName}, זה מסע חוקי, אבל הוא לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed, {
-          practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
+        setHighlightedSquares({
+          [playerMove.from]: { background: '#fecaca' },
+          [playerMove.to]: { background: '#fca5a5' },
+        })
+        updateCoach({
+          mood: 'careful',
+          text: getWrongLessonMoveMessage(activePuzzle.puzzle, nextGame, playerMove, childName),
         })
         return false
       }
@@ -1296,7 +1365,7 @@ function App() {
     setGame(nextGame)
     setCoach({
       mood: 'idea',
-      text: nextMoveCount <= 3 ? 'פתחת את המרכז. עכשיו בודק איך להמשיך לפתח כלים.' : 'בודק את המסע עם מנוע שחמט.',
+      text: 'בודק את המסע לפי הלוח ומנוע השחמט.',
     })
     void finishMoveWithEngine(game, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount)
     return true
@@ -1348,10 +1417,7 @@ function App() {
         ? getCheckMessage()
         : {
             mood: 'idea' as const,
-            text:
-              nextMoveCount <= 3
-                ? `${childName}, פתחת את המרכז. עכשיו נבדוק איזה כלי כדאי להוציא.`
-                : `${childName}, מנתח את המסע לפי הלוח ומחפש את הרעיון הבא.`,
+            text: `${childName}, מנתח את המסע לפי הלוח ומחפש את הרעיון הבא.`,
           })
 
     setGame(nextGame)
@@ -1488,8 +1554,8 @@ function App() {
             <Target aria-hidden="true" />
             <span>אימון עכשיו</span>
           </div>
-          <strong>{activePuzzle ? activePuzzle.puzzle.title : activePracticePlan.title}</strong>
-          <p>{activePracticePlan.question}</p>
+          <strong>{activeTrainingTitle}</strong>
+          <p>{activeTrainingQuestion}</p>
         </div>
 
         <div className="controls" aria-label="פעולות משחק">
@@ -1497,9 +1563,9 @@ function App() {
             <Play aria-hidden="true" />
             <span>משחק</span>
           </button>
-          <button type="button" onClick={() => startPractice()} title="תרגול מט">
+          <button type="button" onClick={() => startPractice()} title="שיעור מותאם">
             <Target aria-hidden="true" />
-            <span>תרגול מט</span>
+            <span>שיעור</span>
           </button>
           <button type="button" onClick={() => speak(coach.text)} title="השמע שוב">
             <Volume2 aria-hidden="true" />
@@ -1512,10 +1578,6 @@ function App() {
           <button type="button" onClick={startVoiceQuestion} title="דבר עם המאמן" className={isListening ? 'listening' : undefined}>
             <Mic aria-hidden="true" />
             <span>{isListening ? 'מקשיב' : 'דבר'}</span>
-          </button>
-          <button type="button" onClick={resetGame} title="איפוס משחק">
-            <RefreshCcw aria-hidden="true" />
-            <span>חדש</span>
           </button>
         </div>
       </section>
@@ -1564,7 +1626,7 @@ function App() {
           <strong>{levelLabel}</strong>
         </div>
         <div>
-          <span>תרגולים</span>
+          <span>שיעורים</span>
           <strong>
             {solvedPracticeCount}/{practicePuzzles.length}
           </strong>
@@ -1581,7 +1643,7 @@ function App() {
             <BarChart3 aria-hidden="true" />
             <span>דוח התקדמות</span>
           </div>
-          <p>{activePracticePlan.parentNote}</p>
+          <p>{activeParentNote}</p>
         </div>
         <div className="parent-report" aria-label="סיכום להורה">
           <div>
@@ -1593,11 +1655,11 @@ function App() {
             <strong>{skillLabels[weakestSkillKey]}</strong>
           </div>
           <div>
-            <span>התרגול הבא</span>
+            <span>השיעור הבא</span>
             <strong>{recommendedPuzzle.title}</strong>
           </div>
         </div>
-        <div className="lesson-strip" aria-label="סרגל תרגולי מט">
+        <div className="lesson-strip" aria-label="סרגל שיעורים">
           {practicePuzzles.map((puzzle, index) => (
             <button
               type="button"

@@ -136,7 +136,7 @@ function buildTrainingFocus(body: CoachRequest) {
 
   if (body.event === 'onboarding') {
     topic = 'opening'
-    nextQuestion = 'רוצה להתחיל משחק או תרגול קצר?'
+    nextQuestion = 'רוצה להתחיל משחק חופשי או שיעור קצר?'
   } else if (body.event === 'practice') {
     topic = practiceSkill ?? 'focus'
     nextQuestion = practiceQuestions[topic]
@@ -282,7 +282,7 @@ function isCleanHebrewCoachText(text: string) {
 
 function matchesActiveLesson(text: string, body: CoachRequest) {
   if (body.event !== 'practice') return true
-  if (/להתחיל משחק|תרגול קצר|רוצה להתחיל/.test(text)) return false
+  if (/להתחיל משחק|שיעור קצר|תרגול קצר|רוצה להתחיל/.test(text)) return false
   if (body.practice?.skill === 'opening' && /מט/.test(text)) return false
   return true
 }
@@ -326,6 +326,23 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   const name = cleanCoachName(body.childName) || 'אלוף'
   const practice = body.practice
+  const isWrongLessonMove = /לא פותר|לא מט|לא סוגר/.test(body.localMessage)
+
+  if (isWrongLessonMove) {
+    if (practice.title?.includes('מט') || practice.id?.includes('mate')) {
+      return {
+        text: `${name}, זה מסע חוקי, אבל הוא לא מסיים את הרעיון. בשיעור הזה מחפשים שח שסוגר למלך את כל הבריחות.`,
+        mood: 'careful',
+        source: 'rules',
+      }
+    }
+
+    return {
+      text: `${name}, זה מסע חוקי, אבל הוא לא עונה על מטרת השיעור. נסה לחשוב מה הרעיון המרכזי כאן.`,
+      mood: 'careful',
+      source: 'rules',
+    }
+  }
 
   if (practice.solved) {
     if (practice.id === 'mate-two-queen-bishop') {
@@ -345,7 +362,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
     }
 
     return {
-      text: `${name}, יפה. פתרת את התרגול הזה. עכשיו ננסה להשתמש באותו רעיון גם במשחק אמיתי.`,
+      text: `${name}, יפה. פתרת את השיעור הזה. עכשיו ננסה להשתמש באותו רעיון גם במשחק אמיתי.`,
       mood: 'good',
       source: 'rules',
     }
@@ -353,7 +370,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.id === 'mate-one-queen-bishop') {
     return {
-      text: `${name}, זה מט באחד. חפש מסע של המלכה שנותן שח, בזמן שהרץ סוגר בריחה.`,
+      text: `${name}, יש כאן מט באחד. חפש שח שבו כלי אחד תוקף את המלך וכלי אחר סוגר לו בריחה.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -361,7 +378,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.id === 'scholars-mate-finish') {
     return {
-      text: `${name}, זה מט באחד. המלכה והרץ מסתכלים יחד על נקודה חלשה ליד המלך.`,
+      text: `${name}, יש כאן נקודה חלשה ליד המלך. חפש שח שמנצל אותה ולא משאיר בריחה.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -369,7 +386,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.id === 'back-rank-rook-mate') {
     return {
-      text: `${name}, זה מט באחד. המלך תקוע מאחורי הרגלים שלו, אז חפש שח עם הצריח.`,
+      text: `${name}, המלך תקוע מאחורי הרגלים שלו. חפש שח בשורה האחרונה שלא משאיר לו דרך לצאת.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -377,7 +394,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.id === 'ladder-rook-mate') {
     return {
-      text: `${name}, זה מט באחד. שני צריחים עובדים כמו סולם וסוגרים את המלך בקצה.`,
+      text: `${name}, שני כלים עובדים כמו סולם וסוגרים את המלך בקצה. חפש את השח שסוגר את השורה.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -385,7 +402,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.id === 'queen-king-corner-mate') {
     return {
-      text: `${name}, זה מט באחד. המלך שלך עוזר למלכה, אז חפש שח שסוגר את הפינה.`,
+      text: `${name}, המלך שלך עוזר לסגור פינה. חפש שח שבו למלך היריב אין משבצת בטוחה.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -405,46 +422,6 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
         }
   }
 
-  if (practice.id === 'opening-first-pawn-center') {
-    if ((practice.stage ?? 0) === 1) {
-      return {
-        text: `${name}, יפה. עכשיו תחשוב: איזה סוס יכול לצאת ולעזור לשלוט במרכז?`,
-        mood: 'idea',
-        source: 'rules',
-      }
-    }
-
-    if ((practice.stage ?? 0) === 2) {
-      return {
-        text: `${name}, מצוין. עכשיו איזה רץ יכול לצאת למשבצת פעילה?`,
-        mood: 'idea',
-        source: 'rules',
-      }
-    }
-
-    return {
-      text: `${name}, שיעור פתיחה קצר. איזה רגלי יכול לשלוט במרכז ולפתוח דרך לכלים?`,
-      mood: 'idea',
-      source: 'rules',
-    }
-  }
-
-  if (practice.id === 'opening-knight-center') {
-    return {
-      text: `${name}, עכשיו מוציאים סוס. חפש סוס שיכול לקפוץ קרוב למרכז.`,
-      mood: 'idea',
-      source: 'rules',
-    }
-  }
-
-  if (practice.id === 'opening-bishop-out') {
-    return {
-      text: `${name}, עכשיו מוציאים רץ. חפש רץ שיש לו דרך פתוחה לצאת למשחק.`,
-      mood: 'idea',
-      source: 'rules',
-    }
-  }
-
   if (practice.skill === 'safety') {
     return {
       text: `${name}, עצור רגע וחפש כלי של היריב שלא מוגן. אפשר לקחת אותו בלי להפסיד כלי?`,
@@ -455,7 +432,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
   if (practice.skill === 'tactics') {
     return {
-      text: `${name}, חפש קודם שח, אחר כך לקיחה, ואז איום חזק. זה הסדר של בלש שחמט.`,
+      text: `${name}, חפש קודם שח, אחר כך לקיחה, ואז איום חזק. זה סדר מחשבה טוב לפני כל מסע.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -481,7 +458,7 @@ function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
 
   if (body.event === 'onboarding') {
     return {
-      text: `${name}, שלום. אפשר להתחיל משחק או לבחור תרגול קצר.`,
+      text: `${name}, שלום. אפשר להתחיל משחק חופשי או שיעור קצר לפי הרמה שלך.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -515,7 +492,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. If analysis.stockfish exists, treat it as the main chess engine evidence. Explain one concrete board fact: best move, lost piece, mate threat, unsafe piece, or opening principle. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is onboarding, welcome the child by name and ask whether to start a game or a short practice; do not give a chess move tip yet. If event is chat, answer the child question directly using the current position. If event is practice, practice is already active: never ask whether to start a game or practice. The practice.skill and practice.goal are binding. Do not mix topics: opening practice is only about center and developing pieces; safety practice is only about loose pieces; tactics practice is checks, captures, threats; endgame practice is king escape squares and mate nets; focus practice is what must be checked before moving. For opening practice, ask which center pawn or minor piece should move; do not mention mate.',
+          'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats. If analysis.stockfish exists, treat it as the chess authority: use bestMove, mateIn, score, and playedMove to explain the position. Explain one concrete board fact: missed mate, unsafe piece, captured piece, best move, opening principle, or opponent threat. For every game move, be practical in this order: what happened, why it matters, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is onboarding, welcome the child by name and ask whether to start a game or a short lesson; do not give a chess move tip yet. If event is chat, answer the child question directly using the current position and engine evidence. If event is practice, this is a lesson: practice.skill and practice.goal are binding; explain the lesson idea, not a random phrase.',
       },
       {
         role: 'user',
