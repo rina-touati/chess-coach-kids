@@ -70,7 +70,7 @@ type CoachResponse = {
   mood: 'good' | 'careful' | 'idea'
   profile?: unknown
   gameId?: string
-  source: 'openai' | 'fallback'
+  source: 'openai' | 'fallback' | 'rules'
 }
 
 function normalizeProfile(profile: unknown) {
@@ -276,6 +276,7 @@ function isCleanHebrewCoachText(text: string) {
   if (/[\u0600-\u06ff]/.test(text)) return false
   if (/[A-Za-z]/.test(text)) return false
   if (text.length > 180) return false
+  if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return false
   return true
 }
 
@@ -320,9 +321,119 @@ function cleanCoachName(name: unknown) {
   return typeof name === 'string' ? name.trim().slice(0, 40) : ''
 }
 
+function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
+  if (body.event !== 'practice' || !body.practice) return null
+
+  const name = cleanCoachName(body.childName) || 'אלוף'
+  const practice = body.practice
+
+  if (practice.solved) {
+    return {
+      text: `${name}, יפה. פתרת את התרגול הזה. עכשיו ננסה להשתמש באותו רעיון גם במשחק אמיתי.`,
+      mood: 'good',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'opening-first-pawn-center') {
+    if ((practice.stage ?? 0) === 1) {
+      return {
+        text: `${name}, יפה. עכשיו השלב השני: להוציא את הסוס שליד המלך כדי לעזור למרכז.`,
+        mood: 'idea',
+        source: 'rules',
+      }
+    }
+
+    if ((practice.stage ?? 0) === 2) {
+      return {
+        text: `${name}, מצוין. עכשיו השלב השלישי: להוציא את הרץ של המלך למשבצת פעילה.`,
+        mood: 'idea',
+        source: 'rules',
+      }
+    }
+
+    return {
+      text: `${name}, שיעור פתיחה קצר. קודם פותחים את המרכז עם הרגלי של המלך.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'opening-knight-center') {
+    return {
+      text: `${name}, עכשיו מוציאים סוס. חפש סוס שיכול לקפוץ קרוב למרכז.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'opening-bishop-out') {
+    return {
+      text: `${name}, עכשיו מוציאים רץ. חפש רץ שיש לו דרך פתוחה לצאת למשחק.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.skill === 'safety') {
+    return {
+      text: `${name}, עצור רגע וחפש כלי של היריב שלא מוגן. אפשר לקחת אותו בלי להפסיד כלי?`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.skill === 'tactics') {
+    return {
+      text: `${name}, חפש קודם שח, אחר כך לקיחה, ואז איום חזק. זה הסדר של בלש שחמט.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.skill === 'endgame') {
+    return {
+      text: `${name}, תבדוק לאן המלך יכול לברוח. מסע טוב סוגר לו יותר משבצות.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  return {
+    text: `${name}, לפני שנוגעים בכלי בודקים מה היריב מאיים ומה המסע הכי בטוח.`,
+    mood: 'idea',
+    source: 'rules',
+  }
+}
+
+function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
+  const name = cleanCoachName(body.childName) || 'אלוף'
+
+  if (body.event === 'onboarding') {
+    return {
+      text: `${name}, שלום. אפשר להתחיל משחק או לבחור תרגול קצר.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (body.event === 'reset') {
+    return {
+      text: `${name}, מתחילים מחדש. בהתחלה ננסה לשלוט במרכז ולהוציא כלים.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  return getPracticeRuleMessage(body)
+}
+
 async function generateCoachMessage(body: CoachRequest, profile: Record<string, unknown>): Promise<CoachResponse> {
   const forcedMessage = getForcedGameStatusMessage(body)
   if (forcedMessage) return forcedMessage
+
+  const ruleMessage = getRuleBasedCoachMessage(body)
+  if (ruleMessage) return ruleMessage
 
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
   const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'

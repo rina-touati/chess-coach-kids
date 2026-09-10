@@ -50,6 +50,13 @@ type PracticePuzzle = {
   firstMove: { from: Square; to: Square }
   completion: 'after-first' | 'mate-after-reply'
   forcedReply?: string
+  steps?: {
+    move: { from: Square; to: Square }
+    reply?: string
+    success: string
+    prompt: string
+    lastMoveLabel?: string
+  }[]
 }
 
 type PracticeCoachContext = {
@@ -78,9 +85,9 @@ const skillLabels: Record<SkillKey, string> = {
 
 const practicePlans: Record<SkillKey, { title: string; question: string; parentNote: string }> = {
   opening: {
-    title: 'מוציאים כלים למשחק',
-    question: 'איזה סוס או רץ עדיין בבית?',
-    parentNote: 'בפתיחה מחפשים פיתוח כלים ושליטה במרכז, לא מסעות מלכה מוקדמים.',
+    title: 'בונים פתיחה שלמה',
+    question: 'מרכז, סוס, רץ ואז מלך בטוח.',
+    parentNote: 'בפתיחה לא מסיימים אחרי מסע אחד: בונים מרכז, מוציאים כלים, ומתכוננים להצרחה.',
   },
   tactics: {
     title: 'מחפשים איומים',
@@ -114,6 +121,27 @@ const practicePuzzles: PracticePuzzle[] = [
     fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     firstMove: { from: 'e2', to: 'e4' },
     completion: 'after-first',
+    steps: [
+      {
+        move: { from: 'e2', to: 'e4' },
+        reply: 'e5',
+        success: 'יופי, פתחנו את המרכז. השחור גם שם רגלי במרכז, ועכשיו מוציאים סוס.',
+        prompt: 'שלב שני: תוציא את הסוס שליד המלך למשבצת טובה במרכז.',
+        lastMoveLabel: 'השחור: רגלי למרכז',
+      },
+      {
+        move: { from: 'g1', to: 'f3' },
+        reply: 'Nc6',
+        success: 'מצוין, הסוס יצא ותוקף את המרכז. השחור הוציא סוס, ועכשיו מוציאים רץ.',
+        prompt: 'שלב שלישי: הוצא את הרץ של המלך למשבצת פעילה.',
+        lastMoveLabel: 'השחור: סוס למרכז',
+      },
+      {
+        move: { from: 'f1', to: 'c4' },
+        success: 'מעולה. עכשיו יש מרכז, סוס ורץ בחוץ. זו כבר פתיחה אמיתית, לא מסע אחד.',
+        prompt: 'שיעור הפתיחה הושלם.',
+      },
+    ],
   },
   {
     id: 'opening-knight-center',
@@ -627,6 +655,13 @@ function getLevelLabel(skillScores: Record<SkillKey, number>, movesRecorded?: nu
   return 'מתקדם צעיר'
 }
 
+function getBoardFocusSkill(chess: Chess, moveCount: number): SkillKey {
+  if (chess.isCheck() || chess.isCheckmate()) return 'focus'
+  if (moveCount <= 6) return 'opening'
+  if (moveCount >= 22) return 'endgame'
+  return 'focus'
+}
+
 function getRecommendedPuzzle(
   skillScores: Record<SkillKey, number>,
   practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>,
@@ -649,6 +684,14 @@ function getPracticeCoachContext(puzzle: PracticePuzzle, stage: number, solved =
     stage,
     solved,
   }
+}
+
+function getPracticeStep(puzzle: PracticePuzzle, stage: number) {
+  return puzzle.steps?.[stage] ?? null
+}
+
+function getExpectedPracticeMove(puzzle: PracticePuzzle, stage: number) {
+  return getPracticeStep(puzzle, stage)?.move ?? puzzle.firstMove
 }
 
 function mergeDefinedProfile(current: ChildProfile | null, next: ChildProfile) {
@@ -707,7 +750,7 @@ function App() {
   const [lastMove, setLastMove] = useState<string>('עוד לא התחיל')
   const [cloudGameId, setCloudGameId] = useState<string | undefined>()
   const [isListening, setIsListening] = useState(false)
-  const [activePuzzle, setActivePuzzle] = useState<{ puzzle: PracticePuzzle; stage: 0 | 1 } | null>(null)
+  const [activePuzzle, setActivePuzzle] = useState<{ puzzle: PracticePuzzle; stage: number } | null>(null)
   const childName = profile?.displayName?.trim() || fallbackKidName
   const skillScores = normalizeSkillScores(profile?.skillScores)
   const weakestSkillKey = getWeakestSkillKey(skillScores)
@@ -715,10 +758,10 @@ function App() {
   const recommendedPuzzle = getRecommendedPuzzle(skillScores, profile?.summary?.practice_progress ?? {})
   const levelLabel = getLevelLabel(skillScores, profile?.movesRecorded)
   const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
-  const practicePlan = practicePlans[weakestSkillKey]
-  const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlan
+  const boardFocusSkill = getBoardFocusSkill(game, movesPlayed)
+  const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlans[boardFocusSkill]
   const currentTrainingTopic =
-    activePuzzle?.puzzle.title ?? profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? practicePlan.title
+    activePuzzle?.puzzle.title ?? activePracticePlan.title
   const practiceProgress = profile?.summary?.practice_progress ?? {}
   const solvedPracticeCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
 
@@ -1056,21 +1099,23 @@ function App() {
     setCloudGameId(undefined)
     setLastMove(`תרגול: ${puzzle.title}`)
     setHighlightedSquares({})
-    void requestContextCoach('practice', `${childName}, תרגול ${puzzle.title}. ${puzzle.goal} ${practicePlans[puzzle.skill].question}`, childName, puzzleGame, 0, {
+    const firstStep = getPracticeStep(puzzle, 0)
+    void requestContextCoach('practice', `${childName}, ${firstStep?.prompt ?? `תרגול ${puzzle.title}. ${puzzle.goal}`}`, childName, puzzleGame, 0, {
       practice: getPracticeCoachContext(puzzle, 0),
     })
   }
 
-  function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move) {
+  function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move, stage: number) {
+    const step = getPracticeStep(puzzle, stage)
     setGame(nextGame)
     setActivePuzzle(null)
-    setLastMove(`${playerMove.from} אל ${playerMove.to}; הושלם`)
+    setLastMove(`${playerMove.from} אל ${playerMove.to}; שיעור הושלם`)
     setHighlightedSquares({
       [playerMove.from]: { background: '#bfdbfe' },
       [playerMove.to]: { background: '#22c55e' },
     })
-    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${puzzle.title}.`, childName, nextGame, 1, {
-      practice: getPracticeCoachContext(puzzle, 1, true),
+    void requestContextCoach('practice', `${childName}, ${step?.success ?? `השיעור הושלם: ${puzzle.title}.`}`, childName, nextGame, stage + 1, {
+      practice: getPracticeCoachContext(puzzle, stage + 1, true),
     })
     void recordPracticeProgress(puzzle)
   }
@@ -1095,18 +1140,53 @@ function App() {
       return false
     }
 
+    const step = getPracticeStep(activePuzzle.puzzle, activePuzzle.stage)
+
+    if (step) {
+      const isExpectedStepMove = playerMove.from === step.move.from && playerMove.to === step.move.to
+
+      if (!isExpectedStepMove) {
+        void requestContextCoach('practice', `${childName}, זה מסע חוקי, אבל הוא לא פותר את השלב הזה בשיעור.`, childName, game, movesPlayed, {
+          practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
+        })
+        return false
+      }
+
+      if (step.reply) nextGame.move(step.reply)
+
+      const nextStage = activePuzzle.stage + 1
+      const hasNextStep = Boolean(getPracticeStep(activePuzzle.puzzle, nextStage))
+      if (!hasNextStep) {
+        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
+        return true
+      }
+
+      setGame(nextGame)
+      setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: nextStage })
+      setLastMove(`${playerMove.from} אל ${playerMove.to}; ${step.lastMoveLabel ?? 'השחור הגיב'}`)
+      setHighlightedSquares({
+        [playerMove.from]: { background: '#bfdbfe' },
+        [playerMove.to]: { background: '#86efac' },
+      })
+      void requestContextCoach('practice', `${childName}, ${step.success} ${step.prompt}`, childName, nextGame, nextStage, {
+        practice: getPracticeCoachContext(activePuzzle.puzzle, nextStage),
+      })
+      return true
+    }
+
     if (activePuzzle.stage === 0) {
-      const isExpectedFirstMove = playerMove.from === activePuzzle.puzzle.firstMove.from && playerMove.to === activePuzzle.puzzle.firstMove.to
+      const expectedMove = getExpectedPracticeMove(activePuzzle.puzzle, activePuzzle.stage)
+      const isExpectedFirstMove = playerMove.from === expectedMove.from && playerMove.to === expectedMove.to
 
       if (!isExpectedFirstMove) {
-        void requestContextCoach('practice', `${childName}, המסע הזה לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed, {
+        void requestContextCoach('practice', `${childName}, זה מסע חוקי, אבל הוא לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed, {
           practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
         })
         return false
       }
 
       if (activePuzzle.puzzle.completion === 'after-first') {
-        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove)
+        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
         return true
       }
 
@@ -1218,7 +1298,7 @@ function App() {
     setGame(nextGame)
     setCoach({
       mood: 'idea',
-      text: 'בודק את המסע עם מנוע שחמט.',
+      text: nextMoveCount <= 3 ? 'פתחת את המרכז. עכשיו בודק איך להמשיך לפתח כלים.' : 'בודק את המסע עם מנוע שחמט.',
     })
     void finishMoveWithEngine(game, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount)
     return true
@@ -1270,7 +1350,10 @@ function App() {
         ? getCheckMessage()
         : {
             mood: 'idea' as const,
-            text: 'מנתח את המסע לפי הלוח.',
+            text:
+              nextMoveCount <= 3
+                ? `${childName}, פתחת את המרכז. עכשיו נבדוק איזה כלי כדאי להוציא.`
+                : `${childName}, מנתח את המסע לפי הלוח ומחפש את הרעיון הבא.`,
           })
 
     setGame(nextGame)
