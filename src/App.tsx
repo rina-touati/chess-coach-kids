@@ -101,12 +101,37 @@ type MoveAnalysis = {
 }
 
 function speak(text: string) {
+  void speakWithServerVoice(text)
+}
+
+function speakWithBrowserVoice(text: string) {
   window.speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = 'he-IL'
   utterance.rate = 0.9
   utterance.pitch = 1.08
   window.speechSynthesis.speak(utterance)
+}
+
+async function speakWithServerVoice(text: string) {
+  try {
+    const response = await fetch('/api/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+
+    if (!response.ok) throw new Error('Speech API failed')
+
+    window.speechSynthesis.cancel()
+    const blob = await response.blob()
+    const audioUrl = URL.createObjectURL(blob)
+    const audio = new Audio(audioUrl)
+    audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), { once: true })
+    await audio.play()
+  } catch {
+    speakWithBrowserVoice(text)
+  }
 }
 
 function squareIndex(square: string) {
@@ -339,6 +364,63 @@ function App() {
     speak(message.text)
   }
 
+  async function updateCoachFromCloud(
+    fallbackMessage: CoachMessage,
+    nextGame: Chess,
+    playerMove: Move,
+    bestBeforeMove: MoveAnalysis | undefined,
+    playedAnalysis: MoveAnalysis | undefined,
+    nextMoveCount: number,
+  ) {
+    const loss =
+      bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
+        ? bestBeforeMove.score - playedAnalysis.score
+        : 0
+
+    try {
+      const response = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'move',
+          localMessage: fallbackMessage.text,
+          fen: nextGame.fen(),
+          pgn: nextGame.pgn(),
+          moveCount: nextMoveCount,
+          move: {
+            from: playerMove.from,
+            to: playerMove.to,
+            san: playerMove.san,
+            color: 'w',
+          },
+          analysis: {
+            bestMove: bestBeforeMove ? `${bestBeforeMove.move.from}${bestBeforeMove.move.to}` : undefined,
+            playedMove: `${playerMove.from}${playerMove.to}`,
+            bestScore: bestBeforeMove?.score,
+            playedScore: playedAnalysis?.score,
+            loss,
+            scoreLabel: formatScore(evaluateBoard(nextGame)),
+          },
+        }),
+      })
+
+      if (!response.ok) return
+
+      const cloudMessage = (await response.json()) as Partial<CoachMessage>
+      if (typeof cloudMessage.text !== 'string') return
+
+      updateCoach({
+        text: cloudMessage.text,
+        mood:
+          cloudMessage.mood === 'good' || cloudMessage.mood === 'careful' || cloudMessage.mood === 'idea'
+            ? cloudMessage.mood
+            : fallbackMessage.mood,
+      })
+    } catch {
+      // The local coach already spoke, so network failures can stay quiet.
+    }
+  }
+
   function onPieceDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
     if (!targetSquare || game.turn() !== 'w' || game.isGameOver()) return false
 
@@ -363,7 +445,8 @@ function App() {
 
     const playedAnalysis = findMoveAnalysis(analysesBeforeMove, playerMove)
 
-    setMovesPlayed((value) => value + 1)
+    const nextMoveCount = movesPlayed + 1
+    setMovesPlayed(nextMoveCount)
     setLastMove(`${playerMove.from} אל ${playerMove.to}`)
     setHighlightedSquares({
       [playerMove.from]: { background: '#bfdbfe' },
@@ -382,6 +465,7 @@ function App() {
 
     setGame(nextGame)
     updateCoach(message)
+    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount)
     return true
   }
 
