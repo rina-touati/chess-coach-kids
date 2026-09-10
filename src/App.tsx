@@ -12,8 +12,93 @@ type CoachMessage = {
 }
 
 const kidName = 'אלוף'
-const centerSquares = new Set(['d4', 'e4', 'd5', 'e5'])
+const centerSquares = new Set(['c3', 'd3', 'e3', 'f3', 'c4', 'd4', 'e4', 'f4', 'c5', 'd5', 'e5', 'f5', 'c6', 'd6', 'e6', 'f6'])
 const startingBackRank = new Set(['b1', 'c1', 'f1', 'g1'])
+const pieceValues = {
+  p: 100,
+  n: 320,
+  b: 330,
+  r: 500,
+  q: 900,
+  k: 0,
+} as const
+
+const pieceNames = {
+  p: 'רגלי',
+  n: 'סוס',
+  b: 'רץ',
+  r: 'צריח',
+  q: 'מלכה',
+  k: 'מלך',
+} as const
+
+const whitePieceSquareTables = {
+  p: [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+    5, 5, 10, 25, 25, 10, 5, 5,
+    0, 0, 0, 20, 20, 0, 0, 0,
+    5, -5, -10, 0, 0, -10, -5, 5,
+    5, 10, 10, -20, -20, 10, 10, 5,
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ],
+  n: [
+    -50, -40, -30, -30, -30, -30, -40, -50,
+    -40, -20, 0, 5, 5, 0, -20, -40,
+    -30, 5, 10, 15, 15, 10, 5, -30,
+    -30, 0, 15, 20, 20, 15, 0, -30,
+    -30, 5, 15, 20, 20, 15, 5, -30,
+    -30, 0, 10, 15, 15, 10, 0, -30,
+    -40, -20, 0, 0, 0, 0, -20, -40,
+    -50, -40, -30, -30, -30, -30, -40, -50,
+  ],
+  b: [
+    -20, -10, -10, -10, -10, -10, -10, -20,
+    -10, 5, 0, 0, 0, 0, 5, -10,
+    -10, 10, 10, 10, 10, 10, 10, -10,
+    -10, 0, 10, 10, 10, 10, 0, -10,
+    -10, 5, 5, 10, 10, 5, 5, -10,
+    -10, 0, 5, 10, 10, 5, 0, -10,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -20, -10, -10, -10, -10, -10, -10, -20,
+  ],
+  r: [
+    0, 0, 0, 5, 5, 0, 0, 0,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    5, 10, 10, 10, 10, 10, 10, 5,
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ],
+  q: [
+    -20, -10, -10, -5, -5, -10, -10, -20,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -10, 0, 5, 5, 5, 5, 0, -10,
+    -5, 0, 5, 5, 5, 5, 0, -5,
+    0, 0, 5, 5, 5, 5, 0, -5,
+    -10, 5, 5, 5, 5, 5, 0, -10,
+    -10, 0, 5, 0, 0, 0, 0, -10,
+    -20, -10, -10, -5, -5, -10, -10, -20,
+  ],
+  k: [
+    20, 30, 10, 0, 0, 10, 30, 20,
+    20, 20, 0, 0, 0, 0, 20, 20,
+    -10, -20, -20, -20, -20, -20, -20, -10,
+    -20, -30, -30, -40, -40, -30, -30, -20,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+  ],
+} as const
+
+type MoveAnalysis = {
+  move: Move
+  score: number
+}
 
 function speak(text: string) {
   window.speechSynthesis.cancel()
@@ -24,11 +109,139 @@ function speak(text: string) {
   window.speechSynthesis.speak(utterance)
 }
 
-function getCoachMessage(move: Move, chess: Chess): CoachMessage {
+function squareIndex(square: string) {
+  const file = square.charCodeAt(0) - 97
+  const rank = Number(square[1])
+  return (8 - rank) * 8 + file
+}
+
+function pieceSquareBonus(piece: keyof typeof pieceValues, square: string, color: 'w' | 'b') {
+  const index = squareIndex(square)
+  const tableIndex = color === 'w' ? index : 63 - index
+  return whitePieceSquareTables[piece][tableIndex]
+}
+
+function evaluateBoard(chess: Chess) {
+  if (chess.isCheckmate()) return chess.turn() === 'w' ? -100_000 : 100_000
+  if (chess.isDraw()) return 0
+
+  let score = 0
+  const board = chess.board()
+
+  for (let rank = 0; rank < board.length; rank += 1) {
+    for (let file = 0; file < board[rank].length; file += 1) {
+      const piece = board[rank][file]
+      if (!piece) continue
+
+      const square = `${String.fromCharCode(97 + file)}${8 - rank}`
+      const pieceScore = pieceValues[piece.type] + pieceSquareBonus(piece.type, square, piece.color)
+      score += piece.color === 'w' ? pieceScore : -pieceScore
+    }
+  }
+
+  const whiteMobility = new Chess(chess.fen().replace(/ [bw] /, ' w ')).moves().length
+  const blackMobility = new Chess(chess.fen().replace(/ [bw] /, ' b ')).moves().length
+  score += (whiteMobility - blackMobility) * 4
+
+  return score
+}
+
+function scoreMoveForOrdering(move: Move) {
+  const captured = move.captured ? pieceValues[move.captured] : 0
+  const attacker = pieceValues[move.piece]
+  const checkBonus = move.san.includes('+') ? 60 : 0
+  const promotionBonus = move.promotion ? pieceValues[move.promotion] : 0
+
+  return captured * 10 - attacker + checkBonus + promotionBonus
+}
+
+function minimax(chess: Chess, depth: number, alpha: number, beta: number): number {
+  if (depth === 0 || chess.isGameOver()) return evaluateBoard(chess)
+
+  const moves = chess.moves({ verbose: true }).sort((a, b) => scoreMoveForOrdering(b) - scoreMoveForOrdering(a))
+
+  if (chess.turn() === 'w') {
+    let best = -Infinity
+    for (const move of moves) {
+      chess.move(move)
+      best = Math.max(best, minimax(chess, depth - 1, alpha, beta))
+      chess.undo()
+      alpha = Math.max(alpha, best)
+      if (beta <= alpha) break
+    }
+    return best
+  }
+
+  let best = Infinity
+  for (const move of moves) {
+    chess.move(move)
+    best = Math.min(best, minimax(chess, depth - 1, alpha, beta))
+    chess.undo()
+    beta = Math.min(beta, best)
+    if (beta <= alpha) break
+  }
+  return best
+}
+
+function analyzeLegalMoves(chess: Chess, depth = 2): MoveAnalysis[] {
+  const moves = chess.moves({ verbose: true })
+
+  return moves
+    .map((move) => {
+      const next = new Chess(chess.fen())
+      next.move(move)
+      return {
+        move,
+        score: minimax(next, depth - 1, -Infinity, Infinity),
+      }
+    })
+    .sort((a, b) => (chess.turn() === 'w' ? b.score - a.score : a.score - b.score))
+}
+
+function findMoveAnalysis(analyses: MoveAnalysis[], playedMove: Move) {
+  return analyses.find(
+    (analysis) => analysis.move.from === playedMove.from && analysis.move.to === playedMove.to && analysis.move.promotion === playedMove.promotion,
+  )
+}
+
+function formatScore(score: number) {
+  if (Math.abs(score) > 90_000) return score > 0 ? 'כמעט ניצחון ללבן' : 'כמעט ניצחון לשחור'
+  const pawns = Math.abs(score / 100).toFixed(1)
+  return score >= 0 ? `יתרון לבן בערך ${pawns} רגלים` : `יתרון שחור בערך ${pawns} רגלים`
+}
+
+function explainMoveReason(move: Move) {
+  if (move.san.includes('#')) return 'כי זה נותן מט'
+  if (move.san.includes('+')) return 'כי זה נותן שח ומכריח את היריב להגיב'
+  if (move.captured) return `כי זה לוקח ${pieceNames[move.captured]}`
+  if ((move.piece === 'n' || move.piece === 'b') && startingBackRank.has(move.from)) return 'כי זה מוציא כלי חדש למשחק'
+  if (centerSquares.has(move.to)) return 'כי זה מקרב כלי למרכז'
+  return 'כי זה משפר את המקום של הכלי'
+}
+
+function getCoachMessage(move: Move, chess: Chess, bestBeforeMove: MoveAnalysis | undefined, playedAnalysis: MoveAnalysis | undefined): CoachMessage {
   if (chess.isCheckmate()) {
     return {
       mood: 'good',
       text: `וואו ${kidName}! זה מט. ניצחת במשחק.`,
+    }
+  }
+
+  if (bestBeforeMove && playedAnalysis) {
+    const loss = bestBeforeMove.score - playedAnalysis.score
+
+    if (loss > 250) {
+      return {
+        mood: 'careful',
+        text: `עצור רגע. זה מסע חוקי, אבל היה מסע חזק יותר: ${bestBeforeMove.move.from} אל ${bestBeforeMove.move.to}, ${explainMoveReason(bestBeforeMove.move)}.`,
+      }
+    }
+
+    if (loss > 120) {
+      return {
+        mood: 'idea',
+        text: `לא רע, אבל אפשר היה לדייק. המסע ${bestBeforeMove.move.from} אל ${bestBeforeMove.move.to} נראה קצת יותר חזק, ${explainMoveReason(bestBeforeMove.move)}.`,
+      }
     }
   }
 
@@ -76,32 +289,17 @@ function getCoachMessage(move: Move, chess: Chess): CoachMessage {
 
   return {
     mood: 'idea',
-    text: `מסע נחמד. עכשיו נשאל שאלה פשוטה: איזה כלי שלך עוד לא משחק?`,
+    text: `מסע בסדר. המצב עכשיו: ${formatScore(evaluateBoard(chess))}. לפני המסע הבא נשאל: מה היריב מאיים לקחת?`,
   }
 }
 
 function pickBlackMove(chess: Chess) {
-  const moves = chess.moves({ verbose: true })
-  if (moves.length === 0) return null
-
-  const checks = moves.filter((move) => move.san.includes('+'))
-  const captures = moves.filter((move) => move.captured)
-  const develops = moves.filter((move) => move.piece === 'n' || move.piece === 'b')
-  const pool = checks[0] ? checks : captures[0] ? captures : develops[0] ? develops : moves
-
-  return pool[Math.floor(Math.random() * pool.length)]
+  const analyses = analyzeLegalMoves(chess, 3)
+  return analyses[0]?.move ?? null
 }
 
 function getHint(chess: Chess) {
-  const moves = chess.moves({ verbose: true })
-  const capture = moves.find((move) => move.captured)
-  const check = moves.find((move) => move.san.includes('+'))
-  const center = moves.find((move) => centerSquares.has(move.to))
-  const develop = moves.find(
-    (move) => (move.piece === 'n' || move.piece === 'b') && startingBackRank.has(move.from),
-  )
-
-  const best = check ?? capture ?? develop ?? center ?? moves[0]
+  const best = analyzeLegalMoves(chess, 2)[0]?.move
 
   if (!best) {
     return {
@@ -111,7 +309,7 @@ function getHint(chess: Chess) {
   }
 
   return {
-    text: `רמז קטן: תסתכל על הכלי ב${best.from}, אולי הוא יכול ללכת ל${best.to}.`,
+    text: `רמז חכם: נסה ${best.from} אל ${best.to}. ${explainMoveReason(best)}.`,
     squares: {
       [best.from]: { background: '#facc15' },
       [best.to]: { background: '#22c55e' },
@@ -144,6 +342,8 @@ function App() {
   function onPieceDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
     if (!targetSquare || game.turn() !== 'w' || game.isGameOver()) return false
 
+    const analysesBeforeMove = analyzeLegalMoves(game, 2)
+    const bestBeforeMove = analysesBeforeMove[0]
     const nextGame = new Chess(game.fen())
     let playerMove: Move
 
@@ -161,6 +361,8 @@ function App() {
       return false
     }
 
+    const playedAnalysis = findMoveAnalysis(analysesBeforeMove, playerMove)
+
     setMovesPlayed((value) => value + 1)
     setLastMove(`${playerMove.from} אל ${playerMove.to}`)
     setHighlightedSquares({
@@ -168,7 +370,7 @@ function App() {
       [playerMove.to]: { background: '#86efac' },
     })
 
-    const message = getCoachMessage(playerMove, nextGame)
+    const message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis)
 
     if (!nextGame.isGameOver()) {
       const blackMove = pickBlackMove(nextGame)
