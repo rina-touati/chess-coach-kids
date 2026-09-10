@@ -86,7 +86,7 @@ const skillLabels: Record<SkillKey, string> = {
 const practicePlans: Record<SkillKey, { title: string; question: string; parentNote: string }> = {
   opening: {
     title: 'בונים פתיחה שלמה',
-    question: 'מרכז, סוס, רץ ואז מלך בטוח.',
+    question: 'מה עוזר למרכז ופותח דרך לכלים?',
     parentNote: 'בפתיחה לא מסיימים אחרי מסע אחד: בונים מרכז, מוציאים כלים, ומתכוננים להצרחה.',
   },
   tactics: {
@@ -126,14 +126,14 @@ const practicePuzzles: PracticePuzzle[] = [
         move: { from: 'e2', to: 'e4' },
         reply: 'e5',
         success: 'יופי, פתחנו את המרכז. השחור גם שם רגלי במרכז, ועכשיו מוציאים סוס.',
-        prompt: 'שלב שני: תוציא את הסוס שליד המלך למשבצת טובה במרכז.',
+        prompt: 'שלב שני: איזה סוס יכול לצאת ולעזור לשלוט במרכז?',
         lastMoveLabel: 'השחור: רגלי למרכז',
       },
       {
         move: { from: 'g1', to: 'f3' },
         reply: 'Nc6',
         success: 'מצוין, הסוס יצא ותוקף את המרכז. השחור הוציא סוס, ועכשיו מוציאים רץ.',
-        prompt: 'שלב שלישי: הוצא את הרץ של המלך למשבצת פעילה.',
+        prompt: 'שלב שלישי: איזה רץ יכול לצאת למשבצת פעילה?',
         lastMoveLabel: 'השחור: סוס למרכז',
       },
       {
@@ -666,6 +666,10 @@ function getRecommendedPuzzle(
   skillScores: Record<SkillKey, number>,
   practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>,
 ) {
+  const solvedCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
+  const nextStarterLesson = practicePuzzles.find((puzzle) => puzzle.level === 'starter' && !practiceProgress[puzzle.id]?.solved)
+  if (solvedCount < 4 && nextStarterLesson) return nextStarterLesson
+
   const weakest = getWeakestSkillKey(skillScores)
   return (
     practicePuzzles.find((puzzle) => puzzle.skill === weakest && !practiceProgress[puzzle.id]?.solved) ??
@@ -692,6 +696,19 @@ function getPracticeStep(puzzle: PracticePuzzle, stage: number) {
 
 function getExpectedPracticeMove(puzzle: PracticePuzzle, stage: number) {
   return getPracticeStep(puzzle, stage)?.move ?? puzzle.firstMove
+}
+
+function getPracticeHint(puzzle: PracticePuzzle, stage: number, childName: string) {
+  if (puzzle.id === 'opening-first-pawn-center') {
+    if (stage === 0) return `${childName}, רמז קטן: חפש רגלי באמצע הלוח שפותח דרך לרץ ולמלכה.`
+    if (stage === 1) return `${childName}, רמז קטן: חפש סוס שיכול לקפוץ קרוב למרכז.`
+    return `${childName}, רמז קטן: אחרי שהרגלי זז, אחד הרצים קיבל דרך לצאת.`
+  }
+
+  if (puzzle.skill === 'safety') return `${childName}, רמז קטן: חפש כלי של היריב שאין לו שומר.`
+  if (puzzle.skill === 'tactics') return `${childName}, רמז קטן: קודם בודקים שח, אחר כך לקיחה, אחר כך איום.`
+  if (puzzle.skill === 'endgame') return `${childName}, רמז קטן: בדוק לאן המלך יכול לברוח וסגור לו משבצת.`
+  return `${childName}, רמז קטן: עצור ושאל מה היריב מאיים.`
 }
 
 function mergeDefinedProfile(current: ChildProfile | null, next: ChildProfile) {
@@ -803,6 +820,7 @@ function App() {
     if (game.isCheck()) return 'שח'
     return game.turn() === 'w' ? 'התור של הלבן' : 'התור של השחור'
   }, [game])
+  const statusLabel = activePuzzle ? 'תרגול פעיל' : lastMove.includes('שיעור הושלם') ? 'שיעור הושלם' : status
 
   function applyProfileUpdate(nextProfile: unknown) {
     const profileCandidate = normalizeProfilePayload(nextProfile)
@@ -1099,8 +1117,7 @@ function App() {
     setCloudGameId(undefined)
     setLastMove(`תרגול: ${puzzle.title}`)
     setHighlightedSquares({})
-    const firstStep = getPracticeStep(puzzle, 0)
-    void requestContextCoach('practice', `${childName}, ${firstStep?.prompt ?? `תרגול ${puzzle.title}. ${puzzle.goal}`}`, childName, puzzleGame, 0, {
+    void requestContextCoach('practice', `${childName}, תרגול ${puzzle.title}. ${puzzle.goal} ${practicePlans[puzzle.skill].question}`, childName, puzzleGame, 0, {
       practice: getPracticeCoachContext(puzzle, 0),
     })
   }
@@ -1371,6 +1388,15 @@ function App() {
 
   async function showHint() {
     if (game.turn() !== 'w' || game.isGameOver()) return
+
+    if (activePuzzle) {
+      updateCoach({
+        mood: 'idea',
+        text: getPracticeHint(activePuzzle.puzzle, activePuzzle.stage, childName),
+      })
+      return
+    }
+
     setCoach({
       mood: 'idea',
       text: 'בודק רמז עם מנוע שחמט.',
@@ -1534,7 +1560,7 @@ function App() {
       <aside className="parent-panel" aria-label="מצב להורה">
         <div>
           <span>מצב</span>
-          <strong>{activePuzzle ? 'תרגול פעיל' : status}</strong>
+          <strong>{statusLabel}</strong>
         </div>
         <div>
           <span>מסעים של הילד</span>

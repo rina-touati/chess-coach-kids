@@ -338,7 +338,7 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
   if (practice.id === 'opening-first-pawn-center') {
     if ((practice.stage ?? 0) === 1) {
       return {
-        text: `${name}, יפה. עכשיו השלב השני: להוציא את הסוס שליד המלך כדי לעזור למרכז.`,
+        text: `${name}, יפה. עכשיו תחשוב: איזה סוס יכול לצאת ולעזור לשלוט במרכז?`,
         mood: 'idea',
         source: 'rules',
       }
@@ -346,14 +346,14 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
 
     if ((practice.stage ?? 0) === 2) {
       return {
-        text: `${name}, מצוין. עכשיו השלב השלישי: להוציא את הרץ של המלך למשבצת פעילה.`,
+        text: `${name}, מצוין. עכשיו איזה רץ יכול לצאת למשבצת פעילה?`,
         mood: 'idea',
         source: 'rules',
       }
     }
 
     return {
-      text: `${name}, שיעור פתיחה קצר. קודם פותחים את המרכז עם הרגלי של המלך.`,
+      text: `${name}, שיעור פתיחה קצר. איזה רגלי יכול לשלוט במרכז ולפתוח דרך לכלים?`,
       mood: 'idea',
       source: 'rules',
     }
