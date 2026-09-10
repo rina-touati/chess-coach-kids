@@ -11,6 +11,15 @@ type CoachMessage = {
   mood: CoachMood
 }
 
+type StockfishAnalysis = {
+  bestMove: string | null
+  ponder: string | null
+  scoreCp: number | null
+  mateIn: number | null
+  depth: number | null
+  source: 'stockfish'
+}
+
 type ChildProfile = {
   childProfileId?: string
   displayName?: string
@@ -82,6 +91,16 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
 
 const practicePuzzles: PracticePuzzle[] = [
   {
+    id: 'opening-first-pawn-center',
+    title: 'פתיחה: רגלי למרכז',
+    level: 'starter',
+    skill: 'opening',
+    goal: 'פותחים דרך לכלים ושולטים במרכז.',
+    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    firstMove: { from: 'e2', to: 'e4' },
+    completion: 'after-first',
+  },
+  {
     id: 'opening-knight-center',
     title: 'פתיחה: להוציא סוס',
     level: 'starter',
@@ -89,6 +108,26 @@ const practicePuzzles: PracticePuzzle[] = [
     goal: 'מוציאים סוס למשחק כדי לעזור לשלוט במרכז.',
     fen: 'rn1qkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     firstMove: { from: 'g1', to: 'f3' },
+    completion: 'after-first',
+  },
+  {
+    id: 'opening-bishop-out',
+    title: 'פתיחה: להוציא רץ',
+    level: 'starter',
+    skill: 'opening',
+    goal: 'אחרי שהמרכז נפתח, מוציאים רץ ומכינים הצרחה.',
+    fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1',
+    firstMove: { from: 'f1', to: 'c4' },
+    completion: 'after-first',
+  },
+  {
+    id: 'safety-free-queen',
+    title: 'כלי לא מוגן',
+    level: 'starter',
+    skill: 'safety',
+    goal: 'בודקים אם יש כלי של היריב שאפשר לקחת בלי להפסיד.',
+    fen: '4k3/8/8/8/4q3/8/4Q3/4K3 w - - 0 1',
+    firstMove: { from: 'e2', to: 'e4' },
     completion: 'after-first',
   },
   {
@@ -111,6 +150,26 @@ const practicePuzzles: PracticePuzzle[] = [
     firstMove: { from: 'h5', to: 'f7' },
     completion: 'mate-after-reply',
     forcedReply: 'Kh8',
+  },
+  {
+    id: 'endgame-king-queen-net',
+    title: 'סיום: מצמצמים מלך',
+    level: 'builder',
+    skill: 'endgame',
+    goal: 'משתמשים במלכה כדי לצמצם למלך את המקום.',
+    fen: '6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1',
+    firstMove: { from: 'f2', to: 'a7' },
+    completion: 'after-first',
+  },
+  {
+    id: 'focus-stop-check',
+    title: 'ריכוז: לצאת משח',
+    level: 'starter',
+    skill: 'focus',
+    goal: 'כשיש שח, קודם כל מצילים את המלך.',
+    fen: '4k3/8/8/8/8/8/4r3/4K3 w - - 0 1',
+    firstMove: { from: 'e1', to: 'd1' },
+    completion: 'after-first',
   },
 ]
 
@@ -437,86 +496,6 @@ function explainMoveReason(move: Move) {
   return 'כי זה משפר את המקום של הכלי'
 }
 
-function getCoachMessage(
-  move: Move,
-  chess: Chess,
-  bestBeforeMove: MoveAnalysis | undefined,
-  playedAnalysis: MoveAnalysis | undefined,
-  childName: string,
-): CoachMessage {
-  if (chess.isCheckmate()) {
-    return {
-      mood: 'good',
-      text: `וואו ${childName}! זה מט. ניצחת במשחק.`,
-    }
-  }
-
-  if (bestBeforeMove && playedAnalysis) {
-    const loss = bestBeforeMove.score - playedAnalysis.score
-
-    if (loss > 250) {
-      return {
-        mood: 'careful',
-        text: `עצור רגע. זה מסע חוקי, אבל היה מסע חזק יותר: ${bestBeforeMove.move.from} אל ${bestBeforeMove.move.to}, ${explainMoveReason(bestBeforeMove.move)}.`,
-      }
-    }
-
-    if (loss > 120) {
-      return {
-        mood: 'idea',
-        text: `לא רע, אבל אפשר היה לדייק. המסע ${bestBeforeMove.move.from} אל ${bestBeforeMove.move.to} נראה קצת יותר חזק, ${explainMoveReason(bestBeforeMove.move)}.`,
-      }
-    }
-  }
-
-  if (move.san.includes('+')) {
-    return {
-      mood: 'good',
-      text: `יפה מאוד. עשית שח למלך. עכשיו תחפש איך להביא עוד כלי לעזור.`,
-    }
-  }
-
-  if (move.captured) {
-    return {
-      mood: 'good',
-      text: `יופי! לקחת כלי של היריב. עכשיו תבדוק שהכלי שלך לא נשאר לבד.`,
-    }
-  }
-
-  if (move.piece === 'n' && startingBackRank.has(move.from)) {
-    return {
-      mood: 'good',
-      text: `מעולה. הוצאת סוס למשחק. בתחילת משחק אוהבים להביא סוסים ורצים למרכז.`,
-    }
-  }
-
-  if (move.piece === 'b' && startingBackRank.has(move.from)) {
-    return {
-      mood: 'good',
-      text: `יפה. הרץ יצא מהבית. ככל שיותר כלים משחקים, הצבא שלך חזק יותר.`,
-    }
-  }
-
-  if (centerSquares.has(move.to)) {
-    return {
-      mood: 'idea',
-      text: `רעיון טוב. המרכז הוא מקום חשוב. מי ששולט במרכז רואה יותר משבצות.`,
-    }
-  }
-
-  if (move.piece === 'q') {
-    return {
-      mood: 'careful',
-      text: `המלכה חזקה מאוד, אבל לא כדאי להוציא אותה לבד מוקדם מדי. תנסה להביא גם סוס או רץ.`,
-    }
-  }
-
-  return {
-    mood: 'idea',
-    text: `מסע בסדר. המצב עכשיו: ${formatScore(evaluateBoard(chess))}. לפני המסע הבא נשאל: מה היריב מאיים לקחת?`,
-  }
-}
-
 function getGameOverMessage(chess: Chess, childName: string): CoachMessage | null {
   if (chess.isCheckmate()) {
     return chess.turn() === 'w'
@@ -547,8 +526,9 @@ function getCheckMessage(): CoachMessage {
   }
 }
 
-function pickBlackMove(chess: Chess) {
-  const analyses = analyzeLegalMoves(chess, 3)
+function pickBlackMove(chess: Chess, skillLevel = 8) {
+  const fallbackDepth = skillLevel <= 4 ? 1 : skillLevel <= 9 ? 2 : 3
+  const analyses = analyzeLegalMoves(chess, fallbackDepth)
   return analyses[0]?.move ?? null
 }
 
@@ -615,6 +595,63 @@ function getWeakestSkillKey(skillScores: Record<SkillKey, number>) {
   return (Object.entries(skillScores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'focus') as SkillKey
 }
 
+function getStrongestSkillKey(skillScores: Record<SkillKey, number>) {
+  return (Object.entries(skillScores).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'opening') as SkillKey
+}
+
+function getAdaptiveEngineSkill(skillScores: Record<SkillKey, number>) {
+  const average = Object.values(skillScores).reduce((sum, score) => sum + score, 0) / Object.values(skillScores).length
+  return Math.max(2, Math.min(14, Math.round(2 + average / 10)))
+}
+
+function getLevelLabel(skillScores: Record<SkillKey, number>, movesRecorded?: number) {
+  const average = Object.values(skillScores).reduce((sum, score) => sum + score, 0) / Object.values(skillScores).length
+  if ((movesRecorded ?? 0) < 20 || average < 55) return 'מתחיל'
+  if (average < 72) return 'יודע קצת'
+  return 'מתקדם צעיר'
+}
+
+function getRecommendedPuzzle(
+  skillScores: Record<SkillKey, number>,
+  practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>,
+) {
+  const weakest = getWeakestSkillKey(skillScores)
+  return (
+    practicePuzzles.find((puzzle) => puzzle.skill === weakest && !practiceProgress[puzzle.id]?.solved) ??
+    practicePuzzles.find((puzzle) => !practiceProgress[puzzle.id]?.solved) ??
+    practicePuzzles.find((puzzle) => puzzle.level === 'builder') ??
+    practicePuzzles[0]
+  )
+}
+
+function moveFromUci(chess: Chess, uci: string | null) {
+  if (!uci || uci.length < 4) return null
+  const from = uci.slice(0, 2) as Square
+  const to = uci.slice(2, 4) as Square
+  const promotion = uci[4] as 'q' | 'r' | 'b' | 'n' | undefined
+
+  try {
+    return new Chess(chess.fen()).move({ from, to, promotion: promotion ?? 'q' })
+  } catch {
+    return null
+  }
+}
+
+async function fetchStockfishAnalysis(chess: Chess, skillLevel: number, movetime = 350) {
+  const response = await fetch('/api/stockfish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fen: chess.fen(),
+      movetime,
+      skillLevel,
+    }),
+  })
+
+  if (!response.ok) throw new Error('Stockfish failed')
+  return (await response.json()) as StockfishAnalysis
+}
+
 function App() {
   const [profile, setProfile] = useState<ChildProfile | null>(null)
   const [isProfileReady, setIsProfileReady] = useState(false)
@@ -634,6 +671,10 @@ function App() {
   const childName = profile?.displayName?.trim() || fallbackKidName
   const skillScores = normalizeSkillScores(profile?.skillScores)
   const weakestSkillKey = getWeakestSkillKey(skillScores)
+  const strongestSkillKey = getStrongestSkillKey(skillScores)
+  const recommendedPuzzle = getRecommendedPuzzle(skillScores, profile?.summary?.practice_progress ?? {})
+  const levelLabel = getLevelLabel(skillScores, profile?.movesRecorded)
+  const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
   const practicePlan = practicePlans[weakestSkillKey]
   const currentTrainingTopic = profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? practicePlan.title
   const practiceProgress = profile?.summary?.practice_progress ?? {}
@@ -694,7 +735,7 @@ function App() {
   }
 
   async function requestContextCoach(
-    event: 'reset' | 'practice' | 'onboarding',
+    event: 'reset' | 'practice' | 'onboarding' | 'hint',
     fallbackText: string,
     nameOverride?: string,
     contextGame = game,
@@ -792,6 +833,11 @@ function App() {
     nextMoveCount: number,
     blackMove: Move | null,
     lockLocalMessage = false,
+    engineContext?: {
+      beforeMove?: StockfishAnalysis | null
+      afterPlayerMove?: StockfishAnalysis | null
+      afterBlackMove?: StockfishAnalysis | null
+    },
   ) {
     const loss =
       bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
@@ -816,13 +862,18 @@ function App() {
             color: 'w',
           },
           analysis: {
-            bestMove: bestBeforeMove ? `${bestBeforeMove.move.from}${bestBeforeMove.move.to}` : undefined,
+            bestMove: engineContext?.beforeMove?.bestMove ?? (bestBeforeMove ? `${bestBeforeMove.move.from}${bestBeforeMove.move.to}` : undefined),
             playedMove: `${playerMove.from}${playerMove.to}`,
             bestScore: bestBeforeMove?.score,
             playedScore: playedAnalysis?.score,
             loss,
             safetyPenalty: playedAnalysis?.safetyPenalty,
             scoreLabel: formatScore(evaluateBoard(nextGame)),
+            stockfish: {
+              beforeMove: engineContext?.beforeMove ?? null,
+              afterPlayerMove: engineContext?.afterPlayerMove ?? null,
+              afterBlackMove: engineContext?.afterBlackMove ?? null,
+            },
           },
           gameStatus: {
             isCheckmate: nextGame.isCheckmate(),
@@ -948,7 +999,7 @@ function App() {
     }
   }
 
-  function startPractice(selectedPuzzle = practicePuzzles[0]) {
+  function startPractice(selectedPuzzle = recommendedPuzzle) {
     const puzzle = selectedPuzzle
     const puzzleGame = new Chess(puzzle.fen)
     setActivePuzzle({ puzzle, stage: 0 })
@@ -1104,44 +1155,100 @@ function App() {
       [playerMove.to]: { background: '#86efac' },
     })
 
-    let message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis, childName)
-    let blackMove: Move | null = null
+    setGame(nextGame)
+    setCoach({
+      mood: 'idea',
+      text: 'בודק את המסע עם מנוע שחמט.',
+    })
+    void finishMoveWithEngine(game, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount)
+    return true
+  }
 
-    if (!nextGame.isGameOver()) {
-      blackMove = pickBlackMove(nextGame)
-      if (blackMove) {
-        nextGame.move({ from: blackMove.from, to: blackMove.to, promotion: 'q' })
-        setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: ${blackMove.from} אל ${blackMove.to}`)
+  async function finishMoveWithEngine(
+    gameBeforeMove: Chess,
+    afterPlayerMove: Chess,
+    playerMove: Move,
+    bestBeforeMove: MoveAnalysis | undefined,
+    playedAnalysis: MoveAnalysis | undefined,
+    nextMoveCount: number,
+  ) {
+    let blackMove: Move | null = null
+    let engineBeforeMove: StockfishAnalysis | null = null
+    let engineAfterPlayerMove: StockfishAnalysis | null = null
+    let engineAfterBlackMove: StockfishAnalysis | null = null
+    const nextGame = new Chess(afterPlayerMove.fen())
+
+    try {
+      const [beforeResult, blackResult] = await Promise.all([
+        fetchStockfishAnalysis(gameBeforeMove, 20, 320),
+        nextGame.isGameOver() ? Promise.resolve(null) : fetchStockfishAnalysis(nextGame, adaptiveEngineSkill, 380),
+      ])
+      engineBeforeMove = beforeResult
+      engineAfterPlayerMove = blackResult
+
+      const stockfishBlackMove = moveFromUci(nextGame, blackResult?.bestMove ?? null)
+      blackMove = stockfishBlackMove ?? (!nextGame.isGameOver() ? pickBlackMove(nextGame, adaptiveEngineSkill) : null)
+    } catch {
+      blackMove = !nextGame.isGameOver() ? pickBlackMove(nextGame, adaptiveEngineSkill) : null
+    }
+
+    if (blackMove && !nextGame.isGameOver()) {
+      nextGame.move({ from: blackMove.from, to: blackMove.to, promotion: blackMove.promotion ?? 'q' })
+      setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: ${blackMove.from} אל ${blackMove.to}`)
+      try {
+        engineAfterBlackMove = await fetchStockfishAnalysis(nextGame, 20, 220)
+      } catch {
+        engineAfterBlackMove = null
       }
     }
 
     const terminalMessage = getGameOverMessage(nextGame, childName)
-    let lockLocalMessage = Boolean(terminalMessage)
-    if (terminalMessage) {
-      message = terminalMessage
-    } else if (blackMove && nextGame.isCheck()) {
-      message = getCheckMessage()
-      lockLocalMessage = true
-    }
+    const lockLocalMessage = Boolean(terminalMessage || (blackMove && nextGame.isCheck()))
+    const message =
+      terminalMessage ??
+      (blackMove && nextGame.isCheck()
+        ? getCheckMessage()
+        : {
+            mood: 'idea' as const,
+            text: 'מנתח את המסע לפי הלוח.',
+          })
 
     setGame(nextGame)
+
     if (lockLocalMessage) {
       updateCoach(message)
-    } else {
-      setCoach({
-        mood: 'idea',
-        text: 'מנתח את המסע לפי הלוח.',
-      })
     }
-    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage)
-    return true
+
+    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage, {
+      beforeMove: engineBeforeMove,
+      afterPlayerMove: engineAfterPlayerMove,
+      afterBlackMove: engineAfterBlackMove,
+    })
   }
 
-  function showHint() {
+  async function showHint() {
     if (game.turn() !== 'w' || game.isGameOver()) return
-    const hint = getHint(game)
-    setHighlightedSquares(hint.squares)
-    updateCoach({ mood: 'idea', text: hint.text })
+    setCoach({
+      mood: 'idea',
+      text: 'בודק רמז עם מנוע שחמט.',
+    })
+
+    try {
+      const stockfish = await fetchStockfishAnalysis(game, 20, 450)
+      const best = moveFromUci(game, stockfish.bestMove)
+
+      if (!best) throw new Error('No Stockfish hint')
+
+      setHighlightedSquares({
+        [best.from]: { background: '#facc15' },
+        [best.to]: { background: '#22c55e' },
+      })
+      void requestContextCoach('hint', `${childName}, תן רמז קצר לפי Stockfish: ${best.from} אל ${best.to}.`, childName, game, movesPlayed)
+    } catch {
+      const hint = getHint(game)
+      setHighlightedSquares(hint.squares)
+      updateCoach({ mood: 'idea', text: hint.text })
+    }
   }
 
   function resetGame() {
@@ -1299,6 +1406,10 @@ function App() {
           <strong>{currentTrainingTopic}</strong>
         </div>
         <div>
+          <span>רמה מותאמת</span>
+          <strong>{levelLabel}</strong>
+        </div>
+        <div>
           <span>שיעורים</span>
           <strong>
             {solvedPracticeCount}/{practicePuzzles.length}
@@ -1317,6 +1428,20 @@ function App() {
             <span>דוח התקדמות</span>
           </div>
           <p>{practicePlan.parentNote}</p>
+        </div>
+        <div className="parent-report" aria-label="סיכום להורה">
+          <div>
+            <span>התחזק השבוע</span>
+            <strong>{skillLabels[strongestSkillKey]}</strong>
+          </div>
+          <div>
+            <span>צריך חיזוק</span>
+            <strong>{skillLabels[weakestSkillKey]}</strong>
+          </div>
+          <div>
+            <span>השיעור הבא</span>
+            <strong>{recommendedPuzzle.title}</strong>
+          </div>
         </div>
         <div className="lesson-strip" aria-label="סרגל שיעורים">
           {practicePuzzles.map((puzzle, index) => (

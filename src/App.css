@@ -238,7 +238,7 @@ button.listening {
 .parent-panel {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
   gap: 12px;
   align-items: center;
   padding: 14px;
@@ -273,7 +273,7 @@ button.listening {
 .progress-panel {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(180px, 280px) 1fr;
+  grid-template-columns: minmax(220px, 300px) minmax(220px, 300px) minmax(180px, 280px) 1fr;
   gap: 14px;
   padding: 16px;
 }
@@ -294,6 +294,35 @@ button.listening {
   display: grid;
   gap: 10px;
   align-content: center;
+  max-height: 280px;
+  overflow: auto;
+  padding-inline-end: 2px;
+}
+
+.parent-report {
+  display: grid;
+  gap: 8px;
+}
+
+.parent-report div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.parent-report span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.parent-report strong {
+  color: #172033;
+  font-size: 16px;
+  line-height: 1.2;
 }
 
 .lesson-step {
