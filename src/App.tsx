@@ -52,6 +52,15 @@ type PracticePuzzle = {
   forcedReply?: string
 }
 
+type PracticeCoachContext = {
+  id: string
+  title: string
+  skill: SkillKey
+  goal: string
+  stage: number
+  solved: boolean
+}
+
 const fallbackKidName = 'אלוף'
 const apiBaseUrl = window.location.hostname === 'rina-touati.github.io' ? 'https://chess-coach-kids-one.vercel.app' : ''
 
@@ -631,6 +640,17 @@ function getRecommendedPuzzle(
   )
 }
 
+function getPracticeCoachContext(puzzle: PracticePuzzle, stage: number, solved = false): PracticeCoachContext {
+  return {
+    id: puzzle.id,
+    title: puzzle.title,
+    skill: puzzle.skill,
+    goal: puzzle.goal,
+    stage,
+    solved,
+  }
+}
+
 function mergeDefinedProfile(current: ChildProfile | null, next: ChildProfile) {
   const merged: ChildProfile = { ...(current ?? {}) }
 
@@ -696,7 +716,9 @@ function App() {
   const levelLabel = getLevelLabel(skillScores, profile?.movesRecorded)
   const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
   const practicePlan = practicePlans[weakestSkillKey]
-  const currentTrainingTopic = profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? practicePlan.title
+  const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlan
+  const currentTrainingTopic =
+    activePuzzle?.puzzle.title ?? profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? practicePlan.title
   const practiceProgress = profile?.summary?.practice_progress ?? {}
   const solvedPracticeCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
 
@@ -757,6 +779,9 @@ function App() {
     nameOverride?: string,
     contextGame = game,
     contextMoveCount = movesPlayed,
+    extra?: {
+      practice?: PracticeCoachContext
+    },
   ) {
     const thinkingMessage: CoachMessage = {
       mood: 'idea',
@@ -777,6 +802,7 @@ function App() {
           moveCount: contextMoveCount,
           gameId: cloudGameId,
           childName: nameOverride ?? childName,
+          practice: extra?.practice,
           analysis: {
             scoreLabel: formatScore(evaluateBoard(contextGame)),
           },
@@ -1030,7 +1056,9 @@ function App() {
     setCloudGameId(undefined)
     setLastMove(`תרגול: ${puzzle.title}`)
     setHighlightedSquares({})
-    void requestContextCoach('practice', `${childName}, תרגול. ${puzzle.goal}`, childName, puzzleGame, 0)
+    void requestContextCoach('practice', `${childName}, תרגול. ${puzzle.goal}`, childName, puzzleGame, 0, {
+      practice: getPracticeCoachContext(puzzle, 0),
+    })
   }
 
   function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move) {
@@ -1041,7 +1069,9 @@ function App() {
       [playerMove.from]: { background: '#bfdbfe' },
       [playerMove.to]: { background: '#22c55e' },
     })
-    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${puzzle.title}.`, childName, nextGame, 1)
+    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${puzzle.title}.`, childName, nextGame, 1, {
+      practice: getPracticeCoachContext(puzzle, 1, true),
+    })
     void recordPracticeProgress(puzzle)
   }
 
@@ -1069,7 +1099,9 @@ function App() {
       const isExpectedFirstMove = playerMove.from === activePuzzle.puzzle.firstMove.from && playerMove.to === activePuzzle.puzzle.firstMove.to
 
       if (!isExpectedFirstMove) {
-        void requestContextCoach('practice', `${childName}, המסע הזה לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed)
+        void requestContextCoach('practice', `${childName}, המסע הזה לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed, {
+          practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
+        })
         return false
       }
 
@@ -1087,12 +1119,16 @@ function App() {
         [playerMove.from]: { background: '#bfdbfe' },
         [playerMove.to]: { background: '#86efac' },
       })
-      void requestContextCoach('practice', `${childName}, המסע הראשון נכון. השחור ברח, ועכשיו צריך למצוא מט.`, childName, nextGame, 1)
+      void requestContextCoach('practice', `${childName}, המסע הראשון נכון. השחור ברח, ועכשיו צריך למצוא מט.`, childName, nextGame, 1, {
+        practice: getPracticeCoachContext(activePuzzle.puzzle, 1),
+      })
       return true
     }
 
     if (!playerMove.san.includes('#')) {
-      void requestContextCoach('practice', `${childName}, המסע הזה חוקי אבל הוא לא מט. צריך למצוא מסע שסוגר למלך את כל הבריחות.`, childName, game, 1)
+      void requestContextCoach('practice', `${childName}, המסע הזה חוקי אבל הוא לא מט. צריך למצוא מסע שסוגר למלך את כל הבריחות.`, childName, game, 1, {
+        practice: getPracticeCoachContext(activePuzzle.puzzle, activePuzzle.stage),
+      })
       return false
     }
 
@@ -1103,7 +1139,9 @@ function App() {
       [playerMove.from]: { background: '#bfdbfe' },
       [playerMove.to]: { background: '#22c55e' },
     })
-    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${activePuzzle.puzzle.title}.`, childName, nextGame, 2)
+    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${activePuzzle.puzzle.title}.`, childName, nextGame, 2, {
+      practice: getPracticeCoachContext(activePuzzle.puzzle, 2, true),
+    })
     void recordPracticeProgress(activePuzzle.puzzle)
     return true
   }
@@ -1360,8 +1398,8 @@ function App() {
             <Target aria-hidden="true" />
             <span>אימון עכשיו</span>
           </div>
-          <strong>{practicePlan.title}</strong>
-          <p>{practicePlan.question}</p>
+          <strong>{activePuzzle ? activePuzzle.puzzle.title : activePracticePlan.title}</strong>
+          <p>{activePracticePlan.question}</p>
         </div>
 
         <div className="controls" aria-label="פעולות משחק">
@@ -1449,7 +1487,7 @@ function App() {
             <BarChart3 aria-hidden="true" />
             <span>דוח התקדמות</span>
           </div>
-          <p>{practicePlan.parentNote}</p>
+          <p>{activePracticePlan.parentNote}</p>
         </div>
         <div className="parent-report" aria-label="סיכום להורה">
           <div>
