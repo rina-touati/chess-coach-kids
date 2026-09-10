@@ -631,6 +631,18 @@ function getRecommendedPuzzle(
   )
 }
 
+function mergeDefinedProfile(current: ChildProfile | null, next: ChildProfile) {
+  const merged: ChildProfile = { ...(current ?? {}) }
+
+  for (const [key, value] of Object.entries(next) as [keyof ChildProfile, ChildProfile[keyof ChildProfile]][]) {
+    if (value !== undefined) {
+      merged[key] = value as never
+    }
+  }
+
+  return merged
+}
+
 function moveFromUci(chess: Chess, uci: string | null) {
   if (!uci || uci.length < 4) return null
   const from = uci.slice(0, 2) as Square
@@ -730,10 +742,7 @@ function App() {
   function applyProfileUpdate(nextProfile: unknown) {
     const profileCandidate = normalizeProfilePayload(nextProfile)
     if (!profileCandidate) return
-    setProfile((current) => ({
-      ...(current ?? {}),
-      ...profileCandidate,
-    }))
+    setProfile((current) => mergeDefinedProfile(current, profileCandidate))
     if (profileCandidate.displayName) setNameDraft(profileCandidate.displayName)
   }
 
