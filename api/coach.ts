@@ -340,7 +340,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
         role: 'user',
         content: JSON.stringify({
           childProfile: {
-            name: profile.display_name,
+            name: profile.display_name ?? body.childName,
             level: profile.level,
             skill_scores: profile.skill_scores,
             summary: profile.summary,
