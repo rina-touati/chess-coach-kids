@@ -1056,7 +1056,7 @@ function App() {
     setCloudGameId(undefined)
     setLastMove(`תרגול: ${puzzle.title}`)
     setHighlightedSquares({})
-    void requestContextCoach('practice', `${childName}, תרגול. ${puzzle.goal}`, childName, puzzleGame, 0, {
+    void requestContextCoach('practice', `${childName}, תרגול ${puzzle.title}. ${puzzle.goal} ${practicePlans[puzzle.skill].question}`, childName, puzzleGame, 0, {
       practice: getPracticeCoachContext(puzzle, 0),
     })
   }

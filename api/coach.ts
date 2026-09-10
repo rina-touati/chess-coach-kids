@@ -279,6 +279,13 @@ function isCleanHebrewCoachText(text: string) {
   return true
 }
 
+function matchesActiveLesson(text: string, body: CoachRequest) {
+  if (body.event !== 'practice') return true
+  if (/להתחיל משחק|תרגול קצר|רוצה להתחיל/.test(text)) return false
+  if (body.practice?.skill === 'opening' && /מט/.test(text)) return false
+  return true
+}
+
 function getForcedGameStatusMessage(body: CoachRequest): CoachResponse | null {
   if (body.gameStatus?.isCheckmate) {
     const name = cleanCoachName(body.childName) || 'אלוף'
@@ -327,7 +334,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. If analysis.stockfish exists, treat it as the main chess engine evidence. Explain one concrete board fact: best move, lost piece, mate threat, unsafe piece, or opening principle. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is onboarding, welcome the child by name and ask whether to start a game or a short practice; do not give a chess move tip yet. If event is chat, answer the child question directly using the current position. If event is practice, the practice.skill and practice.goal are binding. Do not mix topics: opening practice is only about center and developing pieces; safety practice is only about loose pieces; tactics practice is checks, captures, threats; endgame practice is king escape squares and mate nets; focus practice is what must be checked before moving.',
+          'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. If analysis.stockfish exists, treat it as the main chess engine evidence. Explain one concrete board fact: best move, lost piece, mate threat, unsafe piece, or opening principle. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is onboarding, welcome the child by name and ask whether to start a game or a short practice; do not give a chess move tip yet. If event is chat, answer the child question directly using the current position. If event is practice, practice is already active: never ask whether to start a game or practice. The practice.skill and practice.goal are binding. Do not mix topics: opening practice is only about center and developing pieces; safety practice is only about loose pieces; tactics practice is checks, captures, threats; endgame practice is king escape squares and mate nets; focus practice is what must be checked before moving. For opening practice, ask which center pawn or minor piece should move; do not mention mate.',
       },
       {
         role: 'user',
@@ -351,7 +358,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
 
   const parsed = safeParseJson(response.output_text)
   const parsedText = typeof parsed?.text === 'string' ? parsed.text.trim() : ''
-  const usedOpenAiText = Boolean(parsedText && isCleanHebrewCoachText(parsedText))
+  const usedOpenAiText = Boolean(parsedText && isCleanHebrewCoachText(parsedText) && matchesActiveLesson(parsedText, body))
   const text = usedOpenAiText ? parsedText : body.localMessage
   const mood = parsed?.mood === 'good' || parsed?.mood === 'careful' || parsed?.mood === 'idea' ? parsed.mood : 'idea'
 
