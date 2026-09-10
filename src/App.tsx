@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
-import { BarChart3, Lightbulb, Mic, RefreshCcw, RotateCcw, Target, Volume2 } from 'lucide-react'
+import { BarChart3, Lightbulb, Mic, Play, RefreshCcw, RotateCcw, Target, Volume2 } from 'lucide-react'
 import './App.css'
 
 type CoachMood = 'good' | 'careful' | 'idea'
@@ -85,14 +85,14 @@ const skillLabels: Record<SkillKey, string> = {
 
 const practicePlans: Record<SkillKey, { title: string; question: string; parentNote: string }> = {
   opening: {
-    title: 'בונים פתיחה שלמה',
-    question: 'מה עוזר למרכז ופותח דרך לכלים?',
-    parentNote: 'בפתיחה לא מסיימים אחרי מסע אחד: בונים מרכז, מוציאים כלים, ומתכוננים להצרחה.',
+    title: 'משחק חופשי',
+    question: 'שחק, ואז המאמן ינתח את המסע.',
+    parentNote: 'משחק חופשי נועד לבדוק החלטות אמיתיות של הילד, לא להוביל אותו יד ביד.',
   },
   tactics: {
-    title: 'מחפשים איומים',
-    question: 'יש שח, לקיחה או איום חזק?',
-    parentNote: 'אחרי כל מסע הילד מתרגל לבדוק איומים לפני שהוא בוחר מסע.',
+    title: 'תרגול מט',
+    question: 'מצא שח שמסיים את המשחק.',
+    parentNote: 'תרגול צריך להיות בעיה אמיתית: הילד מנסה למצוא מט, מקבל רמז רק אם צריך, ואז שומע למה זה עבד.',
   },
   safety: {
     title: 'שומרים על הכלים',
@@ -100,9 +100,9 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
     parentNote: 'זו החולשה הכי חשובה למתחילים: לא להשאיר כלים לא מוגנים.',
   },
   endgame: {
-    title: 'מבינים מט וסיום',
+    title: 'מט וסיום',
     question: 'לאן המלך יכול לברוח?',
-    parentNote: 'בסוף משחק מתרגלים בריחות מלך, הגנות ואיומי מט פשוטים.',
+    parentNote: 'בתרגולי מט הילד לומד לסגור בריחות, לא רק להזיז כלי למשבצת נכונה.',
   },
   focus: {
     title: 'עוצרים לפני המסע',
@@ -113,106 +113,65 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
 
 const practicePuzzles: PracticePuzzle[] = [
   {
-    id: 'opening-first-pawn-center',
-    title: 'פתיחה: רגלי למרכז',
-    level: 'starter',
-    skill: 'opening',
-    goal: 'פותחים דרך לכלים ושולטים במרכז.',
-    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    firstMove: { from: 'e2', to: 'e4' },
-    completion: 'after-first',
-    steps: [
-      {
-        move: { from: 'e2', to: 'e4' },
-        reply: 'e5',
-        success: 'יופי, פתחנו את המרכז. השחור גם שם רגלי במרכז, ועכשיו מוציאים סוס.',
-        prompt: 'שלב שני: איזה סוס יכול לצאת ולעזור לשלוט במרכז?',
-        lastMoveLabel: 'השחור: רגלי למרכז',
-      },
-      {
-        move: { from: 'g1', to: 'f3' },
-        reply: 'Nc6',
-        success: 'מצוין, הסוס יצא ותוקף את המרכז. השחור הוציא סוס, ועכשיו מוציאים רץ.',
-        prompt: 'שלב שלישי: איזה רץ יכול לצאת למשבצת פעילה?',
-        lastMoveLabel: 'השחור: סוס למרכז',
-      },
-      {
-        move: { from: 'f1', to: 'c4' },
-        success: 'מעולה. עכשיו יש מרכז, סוס ורץ בחוץ. זו כבר פתיחה אמיתית, לא מסע אחד.',
-        prompt: 'שיעור הפתיחה הושלם.',
-      },
-    ],
-  },
-  {
-    id: 'opening-knight-center',
-    title: 'פתיחה: להוציא סוס',
-    level: 'starter',
-    skill: 'opening',
-    goal: 'מוציאים סוס למשחק כדי לעזור לשלוט במרכז.',
-    fen: 'rn1qkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    firstMove: { from: 'g1', to: 'f3' },
-    completion: 'after-first',
-  },
-  {
-    id: 'opening-bishop-out',
-    title: 'פתיחה: להוציא רץ',
-    level: 'starter',
-    skill: 'opening',
-    goal: 'אחרי שהמרכז נפתח, מוציאים רץ ומכינים הצרחה.',
-    fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1',
-    firstMove: { from: 'f1', to: 'c4' },
-    completion: 'after-first',
-  },
-  {
-    id: 'safety-free-queen',
-    title: 'כלי לא מוגן',
-    level: 'starter',
-    skill: 'safety',
-    goal: 'בודקים אם יש כלי של היריב שאפשר לקחת בלי להפסיד.',
-    fen: '4k3/8/8/8/4q3/8/4Q3/4K3 w - - 0 1',
-    firstMove: { from: 'e2', to: 'e4' },
-    completion: 'after-first',
-  },
-  {
     id: 'mate-one-queen-bishop',
-    title: 'מט באחד',
+    title: 'מט באחד: מלכה ורץ',
     level: 'starter',
     skill: 'endgame',
-    goal: 'מחפשים מסע אחד שסוגר את כל הבריחות של המלך.',
+    goal: 'מחפשים מסע אחד שסוגר למלך את כל הבריחות.',
     fen: '6k1/5ppp/8/8/2B4Q/8/5PPP/6K1 w - - 0 1',
     firstMove: { from: 'h4', to: 'd8' },
     completion: 'after-first',
   },
   {
-    id: 'mate-two-queen-bishop',
-    title: 'מט בשני שלבים',
-    level: 'builder',
+    id: 'scholars-mate-finish',
+    title: 'מט באחד: מלכת בית ספר',
+    level: 'starter',
     skill: 'tactics',
-    goal: 'קודם נותנים שח עם המלכה, ואז מוצאים מט.',
+    goal: 'המלכה והרץ מסתכלים יחד על נקודת חולשה ליד המלך.',
+    fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4',
+    firstMove: { from: 'h5', to: 'f7' },
+    completion: 'after-first',
+  },
+  {
+    id: 'back-rank-rook-mate',
+    title: 'מט באחד: שורה אחורית',
+    level: 'starter',
+    skill: 'tactics',
+    goal: 'המלך תקוע מאחורי הרגלים שלו. מצא שח שאין ממנו בריחה.',
+    fen: '6k1/5ppp/8/8/8/8/6PP/4R1K1 w - - 0 1',
+    firstMove: { from: 'e1', to: 'e8' },
+    completion: 'after-first',
+  },
+  {
+    id: 'ladder-rook-mate',
+    title: 'מט באחד: סולם',
+    level: 'starter',
+    skill: 'endgame',
+    goal: 'שני צריחים עובדים יחד ודוחפים את המלך לקצה.',
+    fen: '7k/6pp/8/8/8/8/R7/1R4K1 w - - 0 1',
+    firstMove: { from: 'b1', to: 'b8' },
+    completion: 'after-first',
+  },
+  {
+    id: 'queen-king-corner-mate',
+    title: 'מט באחד: מלכה ומלך',
+    level: 'starter',
+    skill: 'endgame',
+    goal: 'המלך שלך עוזר למלכה לסגור את הפינה.',
+    fen: '7k/6Q1/6K1/8/8/8/8/8 w - - 0 1',
+    firstMove: { from: 'g7', to: 'f8' },
+    completion: 'after-first',
+  },
+  {
+    id: 'mate-two-queen-bishop',
+    title: 'מצא מט בשני שלבים',
+    level: 'starter',
+    skill: 'tactics',
+    goal: 'קודם נותנים שח שמכריח את המלך לזוז, ואז מוצאים מט.',
     fen: '6k1/5ppp/8/7Q/2B5/8/5PPP/6K1 w - - 0 1',
     firstMove: { from: 'h5', to: 'f7' },
     completion: 'mate-after-reply',
     forcedReply: 'Kh8',
-  },
-  {
-    id: 'endgame-king-queen-net',
-    title: 'סיום: מצמצמים מלך',
-    level: 'builder',
-    skill: 'endgame',
-    goal: 'משתמשים במלכה כדי לצמצם למלך את המקום.',
-    fen: '6k1/8/8/8/8/8/5Q2/6K1 w - - 0 1',
-    firstMove: { from: 'f2', to: 'a7' },
-    completion: 'after-first',
-  },
-  {
-    id: 'focus-stop-check',
-    title: 'ריכוז: לצאת משח',
-    level: 'starter',
-    skill: 'focus',
-    goal: 'כשיש שח, קודם כל מצילים את המלך.',
-    fen: '4k3/8/8/8/8/8/4r3/4K3 w - - 0 1',
-    firstMove: { from: 'e1', to: 'd1' },
-    completion: 'after-first',
   },
 ]
 
@@ -666,10 +625,6 @@ function getRecommendedPuzzle(
   skillScores: Record<SkillKey, number>,
   practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>,
 ) {
-  const solvedCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
-  const nextStarterLesson = practicePuzzles.find((puzzle) => puzzle.level === 'starter' && !practiceProgress[puzzle.id]?.solved)
-  if (solvedCount < 4 && nextStarterLesson) return nextStarterLesson
-
   const weakest = getWeakestSkillKey(skillScores)
   return (
     practicePuzzles.find((puzzle) => puzzle.skill === weakest && !practiceProgress[puzzle.id]?.solved) ??
@@ -699,6 +654,32 @@ function getExpectedPracticeMove(puzzle: PracticePuzzle, stage: number) {
 }
 
 function getPracticeHint(puzzle: PracticePuzzle, stage: number, childName: string) {
+  if (puzzle.id === 'mate-one-queen-bishop') {
+    return `${childName}, רמז: המלכה יכולה לתת שח, והרץ עוזר לה לשמור על האלכסון.`
+  }
+
+  if (puzzle.id === 'scholars-mate-finish') {
+    return `${childName}, רמז: חפש את הרגלי החלש ליד המלך. המלכה והרץ מסתכלים עליו יחד.`
+  }
+
+  if (puzzle.id === 'back-rank-rook-mate') {
+    return `${childName}, רמז: המלך תקוע מאחורי הרגלים שלו. איזה צריח יכול להגיע לשורה האחרונה?`
+  }
+
+  if (puzzle.id === 'ladder-rook-mate') {
+    return `${childName}, רמז: צריח אחד חוסם, והצריח השני נותן שח מהשורה האחרונה.`
+  }
+
+  if (puzzle.id === 'queen-king-corner-mate') {
+    return `${childName}, רמז: המלך שלך שומר על המלכה. חפש שח ליד הפינה.`
+  }
+
+  if (puzzle.id === 'mate-two-queen-bishop') {
+    return stage === 0
+      ? `${childName}, רמז: קודם צריך שח עם המלכה שמכריח את המלך ללכת לפינה.`
+      : `${childName}, רמז: עכשיו המלך בפינה. חפש שח עם המלכה על השורה האחרונה.`
+  }
+
   if (puzzle.id === 'opening-first-pawn-center') {
     if (stage === 0) return `${childName}, רמז קטן: חפש רגלי באמצע הלוח שפותח דרך לרץ ולמלכה.`
     if (stage === 1) return `${childName}, רמז קטן: חפש סוס שיכול לקפוץ קרוב למרכז.`
@@ -1430,9 +1411,9 @@ function App() {
     setHighlightedSquares({})
     setCoach({
       mood: 'idea',
-      text: 'מכין אימון אישי קצר.',
+      text: `${childName}, משחק חדש התחיל. שחק מסע, ואני אנתח אותו אחרי שתשחק.`,
     })
-    void requestContextCoach('reset', `${childName}, נתחיל מהפתיחה ונבחר כלי טוב למרכז.`, childName, freshGame, 0)
+    void requestContextCoach('reset', `${childName}, משחק חדש התחיל. תורך לשחק לבד, ואז המאמן ינתח את המסע.`, childName, freshGame, 0)
   }
 
   if (!isProfileReady) {
@@ -1512,6 +1493,14 @@ function App() {
         </div>
 
         <div className="controls" aria-label="פעולות משחק">
+          <button type="button" onClick={resetGame} title="משחק חופשי">
+            <Play aria-hidden="true" />
+            <span>משחק</span>
+          </button>
+          <button type="button" onClick={() => startPractice()} title="תרגול מט">
+            <Target aria-hidden="true" />
+            <span>תרגול מט</span>
+          </button>
           <button type="button" onClick={() => speak(coach.text)} title="השמע שוב">
             <Volume2 aria-hidden="true" />
             <span>שוב</span>
@@ -1520,15 +1509,11 @@ function App() {
             <Lightbulb aria-hidden="true" />
             <span>רמז</span>
           </button>
-          <button type="button" onClick={() => startPractice()} title="תרגול">
-            <Target aria-hidden="true" />
-            <span>תרגול</span>
-          </button>
           <button type="button" onClick={startVoiceQuestion} title="דבר עם המאמן" className={isListening ? 'listening' : undefined}>
             <Mic aria-hidden="true" />
             <span>{isListening ? 'מקשיב' : 'דבר'}</span>
           </button>
-          <button type="button" onClick={resetGame} title="משחק חדש">
+          <button type="button" onClick={resetGame} title="איפוס משחק">
             <RefreshCcw aria-hidden="true" />
             <span>חדש</span>
           </button>
@@ -1579,7 +1564,7 @@ function App() {
           <strong>{levelLabel}</strong>
         </div>
         <div>
-          <span>שיעורים</span>
+          <span>תרגולים</span>
           <strong>
             {solvedPracticeCount}/{practicePuzzles.length}
           </strong>
@@ -1608,11 +1593,11 @@ function App() {
             <strong>{skillLabels[weakestSkillKey]}</strong>
           </div>
           <div>
-            <span>השיעור הבא</span>
+            <span>התרגול הבא</span>
             <strong>{recommendedPuzzle.title}</strong>
           </div>
         </div>
-        <div className="lesson-strip" aria-label="סרגל שיעורים">
+        <div className="lesson-strip" aria-label="סרגל תרגולי מט">
           {practicePuzzles.map((puzzle, index) => (
             <button
               type="button"

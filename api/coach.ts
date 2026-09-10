@@ -419,7 +419,7 @@ function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
 
   if (body.event === 'reset') {
     return {
-      text: `${name}, מתחילים מחדש. בהתחלה ננסה לשלוט במרכז ולהוציא כלים.`,
+      text: `${name}, משחק חופשי התחיל. שחק מסע לבד, ואז המאמן ינתח מה קרה על הלוח.`,
       mood: 'idea',
       source: 'rules',
     }
