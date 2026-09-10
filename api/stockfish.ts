@@ -61,7 +61,7 @@ async function runQueued<T>(task: () => Promise<T>) {
   return run
 }
 
-async function analyzePosition(fen: string, movetime: number, skillLevel: number): Promise<StockfishResult> {
+export async function analyzePosition(fen: string, movetime: number, skillLevel: number): Promise<StockfishResult> {
   return runQueued(async () => {
     const engine = await getEngine()
 

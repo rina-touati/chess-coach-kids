@@ -20,6 +20,28 @@ type StockfishAnalysis = {
   source: 'stockfish'
 }
 
+type ServerMoveResponse = {
+  fen: string
+  text: string
+  mood: CoachMood
+  playerMove: {
+    from: string
+    to: string
+    san: string
+  }
+  blackMove: {
+    from: string
+    to: string
+    san: string
+  } | null
+  status: {
+    isCheck: boolean
+    isCheckmate: boolean
+    isDraw: boolean
+    turn: 'w' | 'b'
+  }
+}
+
 type ChildProfile = {
   childProfileId?: string
   displayName?: string
@@ -1176,6 +1198,51 @@ function App() {
     }
   }
 
+  async function applyServerMoveCoach(gameBeforeMove: Chess, playerMove: Move, nextMoveCount: number) {
+    const response = await fetch(apiUrl('/api/move'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fen: gameBeforeMove.fen(),
+        childName,
+        moveCount: nextMoveCount,
+        skillLevel: adaptiveEngineSkill,
+        lessonSkill: guidedLessonSkill,
+        move: {
+          from: playerMove.from,
+          to: playerMove.to,
+          promotion: playerMove.promotion ?? 'q',
+        },
+      }),
+    })
+
+    if (!response.ok) throw new Error('Server move coach failed')
+    const result = (await response.json()) as ServerMoveResponse
+    const serverGame = new Chess(result.fen)
+
+    setGame(serverGame)
+    setLastMove(
+      result.blackMove
+        ? `${result.playerMove.from} אל ${result.playerMove.to}; השחור: ${result.blackMove.from} אל ${result.blackMove.to}`
+        : `${result.playerMove.from} אל ${result.playerMove.to}`,
+    )
+    setHighlightedSquares({
+      [result.playerMove.from]: { background: '#bfdbfe' },
+      [result.playerMove.to]: { background: '#86efac' },
+      ...(result.blackMove
+        ? {
+            [result.blackMove.from]: { background: '#fde68a' },
+            [result.blackMove.to]: { background: result.status.isCheck ? '#fca5a5' : '#facc15' },
+          }
+        : {}),
+    })
+    updateCoach({
+      mood: result.mood === 'good' || result.mood === 'careful' || result.mood === 'idea' ? result.mood : 'idea',
+      text: result.text,
+    })
+  }
+
   async function sendVoiceQuestion(transcript: string) {
     const cleanTranscript = transcript.trim()
     if (!cleanTranscript) return
@@ -1504,6 +1571,13 @@ function App() {
     playedAnalysis: MoveAnalysis | undefined,
     nextMoveCount: number,
   ) {
+    try {
+      await applyServerMoveCoach(gameBeforeMove, playerMove, nextMoveCount)
+      return
+    } catch {
+      // Fall back to the local path if the server-side chess coach is unavailable.
+    }
+
     let blackMove: Move | null = null
     let engineBeforeMove: StockfishAnalysis | null = null
     let engineAfterPlayerMove: StockfishAnalysis | null = null
