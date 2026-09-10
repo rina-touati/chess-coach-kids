@@ -482,6 +482,14 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
   const ruleMessage = getRuleBasedCoachMessage(body)
   if (ruleMessage) return ruleMessage
 
+  if (body.event === 'move') {
+    return {
+      text: body.localMessage,
+      mood: body.analysis?.loss && body.analysis.loss > 150 ? 'careful' : 'idea',
+      source: 'rules',
+    }
+  }
+
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
   const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
   const trainingFocus = buildTrainingFocus(body)

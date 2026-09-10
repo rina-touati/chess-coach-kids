@@ -1166,26 +1166,12 @@ function App() {
       const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
       if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
       applyProfileUpdate(cloudMessage.profile)
-      if (lockLocalMessage) return
-      if (typeof cloudMessage.text !== 'string') {
-        return
-      }
-
-      const nextCoach = {
-        text: cloudMessage.text,
-        mood:
-          cloudMessage.mood === 'good' || cloudMessage.mood === 'careful' || cloudMessage.mood === 'idea'
-            ? cloudMessage.mood
-            : fallbackMessage.mood,
-      }
-
-      updateCoach(nextCoach)
+      // Move feedback must stay tied to the actual board and played move. The cloud
+      // call still records progress, but it cannot replace deterministic chess facts.
+      return
     } catch {
       if (!lockLocalMessage) {
-        updateCoach({
-          mood: fallbackMessage.mood,
-          text: 'לא הצלחתי לנתח בענן עכשיו. נסה עוד מסע או לחץ שוב בעוד רגע.',
-        })
+        updateCoach(fallbackMessage)
       }
     }
   }
