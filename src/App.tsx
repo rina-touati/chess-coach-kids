@@ -761,14 +761,6 @@ function App() {
       bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
         ? bestBeforeMove.score - playedAnalysis.score
         : 0
-    let fallbackWasSpoken = false
-    const fallbackTimer = lockLocalMessage
-      ? undefined
-      : window.setTimeout(() => {
-          fallbackWasSpoken = true
-          updateCoach(fallbackMessage)
-        }, 1600)
-
     try {
       const response = await fetch('/api/coach', {
         method: 'POST',
@@ -816,13 +808,11 @@ function App() {
       if (!response.ok) throw new Error('Coach API failed')
 
       const cloudMessage = (await response.json()) as Partial<CoachMessage> & { profile?: unknown }
-      if (fallbackTimer) window.clearTimeout(fallbackTimer)
       const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
       if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
       applyProfileUpdate(cloudMessage.profile)
       if (lockLocalMessage) return
       if (typeof cloudMessage.text !== 'string') {
-        if (!fallbackWasSpoken) updateCoach(fallbackMessage)
         return
       }
 
@@ -834,15 +824,14 @@ function App() {
             : fallbackMessage.mood,
       }
 
-      if (fallbackWasSpoken) {
-        setCoach(nextCoach)
-      } else {
-        updateCoach(nextCoach)
-      }
+      updateCoach(nextCoach)
     } catch {
-      if (!lockLocalMessage && !fallbackWasSpoken) updateCoach(fallbackMessage)
-    } finally {
-      if (fallbackTimer) window.clearTimeout(fallbackTimer)
+      if (!lockLocalMessage) {
+        updateCoach({
+          mood: fallbackMessage.mood,
+          text: 'לא הצלחתי לנתח בענן עכשיו. נסה עוד מסע או לחץ שוב בעוד רגע.',
+        })
+      }
     }
   }
 
@@ -958,10 +947,7 @@ function App() {
       const isExpectedFirstMove = playerMove.from === activePuzzle.puzzle.firstMove.from && playerMove.to === activePuzzle.puzzle.firstMove.to
 
       if (!isExpectedFirstMove) {
-        updateCoach({
-          mood: 'careful',
-          text: 'כמעט. בפאזל הזה צריך להתחיל בשח עם המלכה.',
-        })
+        void requestContextCoach('practice', `${childName}, המסע הזה לא פותר את השלב הראשון בפאזל.`, childName, game, movesPlayed)
         return false
       }
 
@@ -973,18 +959,12 @@ function App() {
         [playerMove.from]: { background: '#bfdbfe' },
         [playerMove.to]: { background: '#86efac' },
       })
-      updateCoach({
-        mood: 'good',
-        text: 'מצוין. השחור ברח לפינה. עכשיו מצא מסע שנותן מט.',
-      })
+      void requestContextCoach('practice', `${childName}, המסע הראשון נכון. השחור ברח, ועכשיו צריך למצוא מט.`, childName, nextGame, 1)
       return true
     }
 
     if (!playerMove.san.includes('#')) {
-      updateCoach({
-        mood: 'careful',
-        text: 'זה עדיין לא מט. חפש מסע שבו המלך השחור לא יכול לברוח.',
-      })
+      void requestContextCoach('practice', `${childName}, המסע הזה חוקי אבל הוא לא מט. צריך למצוא מסע שסוגר למלך את כל הבריחות.`, childName, game, 1)
       return false
     }
 
@@ -995,10 +975,7 @@ function App() {
       [playerMove.from]: { background: '#bfdbfe' },
       [playerMove.to]: { background: '#22c55e' },
     })
-    updateCoach({
-      mood: 'good',
-      text: `מעולה ${childName}! פתרת מט בשני שלבים. עכשיו אפשר לחזור למשחק ולחפש רעיונות כאלה.`,
-    })
+    void requestContextCoach('practice', `${childName}, הפאזל נפתר. זה היה מט בשני שלבים.`, childName, nextGame, 2)
     void recordPracticeProgress(activePuzzle.puzzle)
     return true
   }
@@ -1096,7 +1073,10 @@ function App() {
     if (lockLocalMessage) {
       updateCoach(message)
     } else {
-      setCoach(message)
+      setCoach({
+        mood: 'idea',
+        text: 'מנתח את המסע לפי הלוח.',
+      })
     }
     void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage)
     return true
