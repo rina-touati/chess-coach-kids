@@ -12,7 +12,7 @@ import {
 } from './_shared.js'
 
 type CoachRequest = {
-  event: 'move' | 'hint' | 'reset' | 'chat'
+  event: 'move' | 'hint' | 'reset' | 'chat' | 'practice'
   localMessage: string
   fen: string
   pgn: string
@@ -57,6 +57,21 @@ type CoachResponse = {
   source: 'openai' | 'fallback'
 }
 
+function normalizeProfile(profile: unknown) {
+  if (!profile || typeof profile !== 'object') return profile
+  const source = profile as Record<string, unknown>
+
+  return {
+    childProfileId: source.child_profile_id ?? source.childProfileId ?? source.id,
+    displayName: source.display_name ?? source.displayName,
+    level: source.level,
+    skillScores: source.skill_scores ?? source.skillScores,
+    summary: source.summary,
+    gamesPlayed: source.games_played ?? source.gamesPlayed,
+    movesRecorded: source.moves_recorded ?? source.movesRecorded,
+  }
+}
+
 const skillLabels = {
   opening: 'פיתוח כלים בפתיחה',
   tactics: 'טקטיקה ואיומים',
@@ -79,7 +94,7 @@ function buildTrainingFocus(body: CoachRequest) {
   const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
   const tags: string[] = []
 
-  if (body.gameStatus?.isCheckmate) tags.push('checkmate')
+    if (body.gameStatus?.isCheckmate) tags.push('checkmate')
   if (body.gameStatus?.isCheck) tags.push('check')
   if (loss > 500) tags.push('big_blunder')
   else if (loss > 150) tags.push('inaccuracy')
@@ -88,11 +103,15 @@ function buildTrainingFocus(body: CoachRequest) {
   if (body.move?.san?.includes('+')) tags.push('tactic')
   if ((body.moveCount ?? 0) <= 8) tags.push('opening')
   if ((body.moveCount ?? 0) >= 22) tags.push('endgame')
+  if (body.event === 'practice') tags.push('practice')
 
   let topic = 'focus' as keyof typeof skillLabels
   let nextQuestion = 'מה היריב מאיים לעשות עכשיו?'
 
-  if (body.gameStatus?.isCheckmate) {
+  if (body.event === 'practice') {
+    topic = 'tactics'
+    nextQuestion = 'איזה מסע יוצר איום מט?'
+  } else if (body.gameStatus?.isCheckmate) {
     topic = 'endgame'
     nextQuestion = 'אילו משבצות בריחה נשארו למלך?'
   } else if (safetyPenalty > 250) {
@@ -103,7 +122,7 @@ function buildTrainingFocus(body: CoachRequest) {
     nextQuestion = 'האם יש שח, לקיחה או איום חזק יותר?'
   } else if ((body.moveCount ?? 0) <= 8) {
     topic = 'opening'
-    nextQuestion = 'איזה סוס או רץ עדיין צריך לצאת למשחק?'
+    nextQuestion = 'איזה כלי קל כדאי לפתח למרכז?'
   } else if ((body.moveCount ?? 0) >= 22) {
     topic = 'endgame'
     nextQuestion = 'איך מקרבים את המלך או יוצרים איום מט?'
@@ -273,7 +292,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Avoid generic praise and avoid phrases like "think about a move to win". For every move, be practical: say what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great" or "well done"; be kind but direct. If event is chat, answer the child question directly using the current position.',
+          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is chat, answer the child question directly using the current position. If event is practice, explain the puzzle goal and what pattern to look for.',
       },
       {
         role: 'user',
@@ -390,7 +409,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     res.status(200).json({
       ...coach,
-      profile: row?.profile ?? profilePatch,
+      profile: normalizeProfile(row?.profile ?? profilePatch),
       gameId: row?.game_id ?? body.gameId,
     })
   } catch (error) {

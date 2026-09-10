@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
-import { Lightbulb, Mic, RefreshCcw, RotateCcw, Volume2 } from 'lucide-react'
+import { BarChart3, Lightbulb, Mic, RefreshCcw, RotateCcw, Target, Volume2 } from 'lucide-react'
 import './App.css'
 
 type CoachMood = 'good' | 'careful' | 'idea'
@@ -18,6 +18,7 @@ type ChildProfile = {
   skillScores?: Record<string, number>
   summary?: {
     weakest_skill_label?: string
+    practice_progress?: Record<string, { solved: boolean; solvedAt?: string }>
     last_training_focus?: {
       topicLabel?: string
       nextQuestion?: string
@@ -28,7 +29,65 @@ type ChildProfile = {
   movesRecorded?: number
 }
 
+type SkillKey = 'opening' | 'tactics' | 'safety' | 'endgame' | 'focus'
+
+type PracticePuzzle = {
+  id: string
+  title: string
+  goal: string
+  fen: string
+  firstMove: { from: Square; to: Square }
+  forcedReply: string
+}
+
 const fallbackKidName = 'אלוף'
+const skillLabels: Record<SkillKey, string> = {
+  opening: 'פתיחה',
+  tactics: 'טקטיקה',
+  safety: 'שמירת כלים',
+  endgame: 'מט וסיום',
+  focus: 'ריכוז',
+}
+
+const practicePlans: Record<SkillKey, { title: string; question: string; parentNote: string }> = {
+  opening: {
+    title: 'מוציאים כלים למשחק',
+    question: 'איזה סוס או רץ עדיין בבית?',
+    parentNote: 'בפתיחה מחפשים פיתוח כלים ושליטה במרכז, לא מסעות מלכה מוקדמים.',
+  },
+  tactics: {
+    title: 'מחפשים איומים',
+    question: 'יש שח, לקיחה או איום חזק?',
+    parentNote: 'אחרי כל מסע הילד מתרגל לבדוק איומים לפני שהוא בוחר מסע.',
+  },
+  safety: {
+    title: 'שומרים על הכלים',
+    question: 'האם הכלי שלי יכול להיאכל בחינם?',
+    parentNote: 'זו החולשה הכי חשובה למתחילים: לא להשאיר כלים לא מוגנים.',
+  },
+  endgame: {
+    title: 'מבינים מט וסיום',
+    question: 'לאן המלך יכול לברוח?',
+    parentNote: 'בסוף משחק מתרגלים בריחות מלך, הגנות ואיומי מט פשוטים.',
+  },
+  focus: {
+    title: 'עוצרים לפני המסע',
+    question: 'מה היריב מאיים לעשות?',
+    parentNote: 'המטרה היא לבנות הרגל קבוע: עוצרים, מסתכלים על איומים, ורק אז זזים.',
+  },
+}
+
+const practicePuzzles: PracticePuzzle[] = [
+  {
+    id: 'mate-two-queen-bishop',
+    title: 'מט בשני שלבים',
+    goal: 'קודם נותנים שח עם המלכה, ואז מוצאים מט.',
+    fen: '6k1/5ppp/8/7Q/2B5/8/5PPP/6K1 w - - 0 1',
+    firstMove: { from: 'h5', to: 'f7' },
+    forcedReply: 'Kh8',
+  },
+]
+
 const centerSquares = new Set(['c3', 'd3', 'e3', 'f3', 'c4', 'd4', 'e4', 'f4', 'c5', 'd5', 'e5', 'f5', 'c6', 'd6', 'e6', 'f6'])
 const startingBackRank = new Set(['b1', 'c1', 'f1', 'g1'])
 const pieceValues = {
@@ -486,6 +545,50 @@ function getHint(chess: Chess) {
   }
 }
 
+function normalizeSkillScores(value: unknown): Record<SkillKey, number> {
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    opening: typeof source.opening === 'number' ? source.opening : 50,
+    tactics: typeof source.tactics === 'number' ? source.tactics : 50,
+    safety: typeof source.safety === 'number' ? source.safety : 50,
+    endgame: typeof source.endgame === 'number' ? source.endgame : 50,
+    focus: typeof source.focus === 'number' ? source.focus : 50,
+  }
+}
+
+function normalizeProfilePayload(value: unknown): ChildProfile | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  const summary = source.summary && typeof source.summary === 'object' ? (source.summary as ChildProfile['summary']) : undefined
+
+  return {
+    childProfileId:
+      typeof source.childProfileId === 'string'
+        ? source.childProfileId
+        : typeof source.child_profile_id === 'string'
+          ? source.child_profile_id
+          : typeof source.id === 'string'
+            ? source.id
+            : undefined,
+    displayName:
+      typeof source.displayName === 'string'
+        ? source.displayName
+        : typeof source.display_name === 'string'
+          ? source.display_name
+          : undefined,
+    level: typeof source.level === 'number' ? source.level : undefined,
+    skillScores: normalizeSkillScores(source.skillScores ?? source.skill_scores),
+    summary,
+    gamesPlayed: typeof source.gamesPlayed === 'number' ? source.gamesPlayed : typeof source.games_played === 'number' ? source.games_played : undefined,
+    movesRecorded:
+      typeof source.movesRecorded === 'number' ? source.movesRecorded : typeof source.moves_recorded === 'number' ? source.moves_recorded : undefined,
+  }
+}
+
+function getWeakestSkillKey(skillScores: Record<SkillKey, number>) {
+  return (Object.entries(skillScores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'focus') as SkillKey
+}
+
 function App() {
   const [profile, setProfile] = useState<ChildProfile | null>(null)
   const [isProfileReady, setIsProfileReady] = useState(false)
@@ -501,8 +604,14 @@ function App() {
   const [lastMove, setLastMove] = useState<string>('עוד לא התחיל')
   const [cloudGameId, setCloudGameId] = useState<string | undefined>()
   const [isListening, setIsListening] = useState(false)
+  const [activePuzzle, setActivePuzzle] = useState<{ puzzle: PracticePuzzle; stage: 0 | 1 } | null>(null)
   const childName = profile?.displayName?.trim() || fallbackKidName
-  const currentTrainingTopic = profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? 'עוד לא נאסף מספיק מידע'
+  const skillScores = normalizeSkillScores(profile?.skillScores)
+  const weakestSkillKey = getWeakestSkillKey(skillScores)
+  const practicePlan = practicePlans[weakestSkillKey]
+  const currentTrainingTopic = profile?.summary?.weakest_skill_label ?? profile?.summary?.last_training_focus?.topicLabel ?? practicePlan.title
+  const practiceProgress = profile?.summary?.practice_progress ?? {}
+  const solvedPracticeCount = practicePuzzles.filter((puzzle) => practiceProgress[puzzle.id]?.solved).length
 
   useEffect(() => {
     let isMounted = true
@@ -511,15 +620,16 @@ function App() {
       try {
         const response = await fetch('/api/profile')
         if (!response.ok) throw new Error('Profile fetch failed')
-        const data = (await response.json()) as { profile?: ChildProfile | null }
+        const data = (await response.json()) as { profile?: unknown }
         if (!isMounted) return
+        const loadedProfile = normalizeProfilePayload(data.profile)
 
-        if (data.profile?.displayName) {
-          setProfile(data.profile)
-          setNameDraft(data.profile.displayName)
+        if (loadedProfile?.displayName) {
+          setProfile(loadedProfile)
+          setNameDraft(loadedProfile.displayName)
           setCoach({
             mood: 'idea',
-            text: `שלום ${data.profile.displayName}. תזיז כלי לבן, ואני אלמד אותך תוך כדי משחק.`,
+            text: 'מכין אימון אישי קצר.',
           })
         }
       } catch {
@@ -543,8 +653,8 @@ function App() {
   }, [game])
 
   function applyProfileUpdate(nextProfile: unknown) {
-    if (!nextProfile || typeof nextProfile !== 'object') return
-    const profileCandidate = nextProfile as ChildProfile
+    const profileCandidate = normalizeProfilePayload(nextProfile)
+    if (!profileCandidate) return
     setProfile((current) => ({
       ...(current ?? {}),
       ...profileCandidate,
@@ -555,6 +665,56 @@ function App() {
   function updateCoach(message: CoachMessage) {
     setCoach(message)
     speak(message.text)
+  }
+
+  async function requestContextCoach(event: 'reset' | 'practice', fallbackText: string, nameOverride?: string, contextGame = game, contextMoveCount = movesPlayed) {
+    const thinkingMessage: CoachMessage = {
+      mood: 'idea',
+      text: 'מכין אימון אישי קצר.',
+    }
+    setCoach(thinkingMessage)
+
+    try {
+      const response = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event,
+          localMessage: fallbackText,
+          fen: contextGame.fen(),
+          pgn: contextGame.pgn(),
+          moveCount: contextMoveCount,
+          gameId: cloudGameId,
+          childName: nameOverride ?? childName,
+          analysis: {
+            scoreLabel: formatScore(evaluateBoard(contextGame)),
+          },
+          gameStatus: {
+            isCheckmate: contextGame.isCheckmate(),
+            isDraw: contextGame.isDraw(),
+            isCheck: contextGame.isCheck(),
+            turn: contextGame.turn(),
+            winner: contextGame.isCheckmate() ? (contextGame.turn() === 'w' ? 'black' : 'white') : null,
+            blackMove: null,
+          },
+        }),
+      })
+
+      if (!response.ok) throw new Error('Coach context failed')
+      const answer = (await response.json()) as Partial<CoachMessage> & { profile?: unknown }
+      applyProfileUpdate(answer.profile)
+      if (typeof answer.text === 'string') {
+        updateCoach({
+          text: answer.text,
+          mood: answer.mood === 'good' || answer.mood === 'careful' || answer.mood === 'idea' ? answer.mood : 'idea',
+        })
+      }
+    } catch {
+      updateCoach({
+        mood: 'idea',
+        text: fallbackText,
+      })
+    }
   }
 
   async function saveChildName(event: React.FormEvent<HTMLFormElement>) {
@@ -571,13 +731,11 @@ function App() {
       })
 
       if (!response.ok) throw new Error('Profile save failed')
-      const data = (await response.json()) as { profile?: ChildProfile }
-      if (data.profile) {
-        setProfile(data.profile)
-        updateCoach({
-          mood: 'idea',
-          text: `שלום ${data.profile.displayName ?? displayName}. מתחילים להתאמן. קודם נבדוק מה היריב מאיים לקחת.`,
-        })
+      const data = (await response.json()) as { profile?: unknown }
+      const savedProfile = normalizeProfilePayload(data.profile)
+      if (savedProfile) {
+        setProfile(savedProfile)
+        void requestContextCoach('reset', `${savedProfile.displayName ?? displayName}, נתחיל מהפתיחה ונבחר כלי טוב למרכז.`, savedProfile.displayName ?? displayName)
       }
     } catch {
       updateCoach({
@@ -744,6 +902,107 @@ function App() {
     }
   }
 
+  async function recordPracticeProgress(puzzle: PracticePuzzle) {
+    try {
+      const response = await fetch('/api/practice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          puzzleId: puzzle.id,
+          puzzleTitle: puzzle.title,
+          solved: true,
+        }),
+      })
+
+      if (!response.ok) return
+      const data = (await response.json()) as { profile?: unknown }
+      applyProfileUpdate(data.profile)
+    } catch {
+      // The spoken success message is more important than persistence failure here.
+    }
+  }
+
+  function startPractice() {
+    const puzzle = practicePuzzles[0]
+    const puzzleGame = new Chess(puzzle.fen)
+    setActivePuzzle({ puzzle, stage: 0 })
+    setGame(puzzleGame)
+    setMovesPlayed(0)
+    setCloudGameId(undefined)
+    setLastMove('תרגול: מט בשני')
+    setHighlightedSquares({})
+    void requestContextCoach('practice', `${childName}, תרגול. ${puzzle.goal}`, childName, puzzleGame, 0)
+  }
+
+  function handlePracticeDrop(sourceSquare: string, targetSquare: string) {
+    if (!activePuzzle || game.turn() !== 'w' || game.isGameOver()) return false
+
+    const nextGame = new Chess(game.fen())
+    let playerMove: Move
+
+    try {
+      playerMove = nextGame.move({
+        from: sourceSquare as Square,
+        to: targetSquare as Square,
+        promotion: 'q',
+      })
+    } catch {
+      updateCoach({
+        mood: 'careful',
+        text: 'זה לא מסע חוקי בפאזל. נסה שוב.',
+      })
+      return false
+    }
+
+    if (activePuzzle.stage === 0) {
+      const isExpectedFirstMove = playerMove.from === activePuzzle.puzzle.firstMove.from && playerMove.to === activePuzzle.puzzle.firstMove.to
+
+      if (!isExpectedFirstMove) {
+        updateCoach({
+          mood: 'careful',
+          text: 'כמעט. בפאזל הזה צריך להתחיל בשח עם המלכה.',
+        })
+        return false
+      }
+
+      nextGame.move(activePuzzle.puzzle.forcedReply)
+      setGame(nextGame)
+      setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: 1 })
+      setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: מלך אל h8`)
+      setHighlightedSquares({
+        [playerMove.from]: { background: '#bfdbfe' },
+        [playerMove.to]: { background: '#86efac' },
+      })
+      updateCoach({
+        mood: 'good',
+        text: 'מצוין. השחור ברח לפינה. עכשיו מצא מסע שנותן מט.',
+      })
+      return true
+    }
+
+    if (!playerMove.san.includes('#')) {
+      updateCoach({
+        mood: 'careful',
+        text: 'זה עדיין לא מט. חפש מסע שבו המלך השחור לא יכול לברוח.',
+      })
+      return false
+    }
+
+    setGame(nextGame)
+    setActivePuzzle(null)
+    setLastMove(`${playerMove.from} אל ${playerMove.to}; מט`)
+    setHighlightedSquares({
+      [playerMove.from]: { background: '#bfdbfe' },
+      [playerMove.to]: { background: '#22c55e' },
+    })
+    updateCoach({
+      mood: 'good',
+      text: `מעולה ${childName}! פתרת מט בשני שלבים. עכשיו אפשר לחזור למשחק ולחפש רעיונות כאלה.`,
+    })
+    void recordPracticeProgress(activePuzzle.puzzle)
+    return true
+  }
+
   function startVoiceQuestion() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
 
@@ -782,6 +1041,7 @@ function App() {
 
   function onPieceDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
     if (!targetSquare || game.turn() !== 'w' || game.isGameOver()) return false
+    if (activePuzzle) return handlePracticeDrop(sourceSquare, targetSquare)
 
     const analysesBeforeMove = analyzeLegalMoves(game, 2)
     const bestBeforeMove = analysesBeforeMove[0]
@@ -851,15 +1111,17 @@ function App() {
 
   function resetGame() {
     const freshGame = new Chess()
+    setActivePuzzle(null)
     setGame(freshGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
     setLastMove('עוד לא התחיל')
     setHighlightedSquares({})
-    updateCoach({
+    setCoach({
       mood: 'idea',
-      text: `${childName}, מתחילים משחק חדש. קודם כל, נסה להוציא סוס או רץ למרכז.`,
+      text: 'מכין אימון אישי קצר.',
     })
+    void requestContextCoach('reset', `${childName}, נתחיל מהפתיחה ונבחר כלי טוב למרכז.`, childName, freshGame, 0)
   }
 
   if (!isProfileReady) {
@@ -929,6 +1191,15 @@ function App() {
           <p>{coach.text}</p>
         </div>
 
+        <div className="training-card" aria-label="מטרת אימון">
+          <div>
+            <Target aria-hidden="true" />
+            <span>אימון עכשיו</span>
+          </div>
+          <strong>{practicePlan.title}</strong>
+          <p>{practicePlan.question}</p>
+        </div>
+
         <div className="controls" aria-label="פעולות משחק">
           <button type="button" onClick={() => speak(coach.text)} title="השמע שוב">
             <Volume2 aria-hidden="true" />
@@ -937,6 +1208,10 @@ function App() {
           <button type="button" onClick={showHint} title="רמז">
             <Lightbulb aria-hidden="true" />
             <span>רמז</span>
+          </button>
+          <button type="button" onClick={startPractice} title="תרגול">
+            <Target aria-hidden="true" />
+            <span>תרגול</span>
           </button>
           <button type="button" onClick={startVoiceQuestion} title="דבר עם המאמן" className={isListening ? 'listening' : undefined}>
             <Mic aria-hidden="true" />
@@ -974,7 +1249,7 @@ function App() {
       <aside className="parent-panel" aria-label="מצב להורה">
         <div>
           <span>מצב</span>
-          <strong>{status}</strong>
+          <strong>{activePuzzle ? 'תרגול פעיל' : status}</strong>
         </div>
         <div>
           <span>מסעים של הילד</span>
@@ -988,11 +1263,51 @@ function App() {
           <span>נושא אימון</span>
           <strong>{currentTrainingTopic}</strong>
         </div>
+        <div>
+          <span>שיעורים</span>
+          <strong>
+            {solvedPracticeCount}/{practicePuzzles.length}
+          </strong>
+        </div>
         <button type="button" onClick={resetGame}>
           <RotateCcw aria-hidden="true" />
           התחלה מחדש
         </button>
       </aside>
+
+      <section className="progress-panel" aria-label="דוח התקדמות להורה">
+        <div className="progress-intro">
+          <div>
+            <BarChart3 aria-hidden="true" />
+            <span>דוח התקדמות</span>
+          </div>
+          <p>{practicePlan.parentNote}</p>
+        </div>
+        <div className="lesson-strip" aria-label="סרגל שיעורים">
+          {practicePuzzles.map((puzzle, index) => (
+            <button
+              type="button"
+              className={practiceProgress[puzzle.id]?.solved ? 'lesson-step solved' : 'lesson-step'}
+              onClick={startPractice}
+              key={puzzle.id}
+            >
+              <span>{index + 1}</span>
+              <strong>{puzzle.title}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="skill-grid">
+          {(Object.keys(skillLabels) as SkillKey[]).map((skill) => (
+            <div className={skill === weakestSkillKey ? 'skill-meter needs-work' : 'skill-meter'} key={skill}>
+              <div>
+                <span>{skillLabels[skill]}</span>
+                <strong>{skillScores[skill]}</strong>
+              </div>
+              <meter min="1" max="100" value={skillScores[skill]} />
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   )
 }
