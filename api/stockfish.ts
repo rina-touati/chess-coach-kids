@@ -1,5 +1,6 @@
 import { Chess } from 'chess.js'
 import { createRequire } from 'node:module'
+import path from 'node:path'
 import { type ApiRequest, type ApiResponse, parseJsonBody, setJsonHeaders } from './_shared.js'
 
 type StockfishEngine = {
@@ -23,7 +24,8 @@ type StockfishResult = {
 }
 
 const require = createRequire(import.meta.url)
-const initStockfish = require('stockfish') as (engine: 'lite-single') => Promise<StockfishEngine>
+const initStockfish = require('stockfish') as (enginePath: string) => Promise<StockfishEngine>
+const enginePath = path.join(process.cwd(), 'api', 'stockfish-engine', 'stockfish-18-lite-single.js')
 
 let enginePromise: Promise<StockfishEngine> | null = null
 let engineQueue = Promise.resolve()
@@ -34,7 +36,7 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 }
 
 async function getEngine() {
-  if (!enginePromise) enginePromise = initStockfish('lite-single')
+  if (!enginePromise) enginePromise = initStockfish(enginePath)
   return enginePromise
 }
 

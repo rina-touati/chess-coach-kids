@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/**/*.ts": {
+      "includeFiles": "api/stockfish-engine/**",
       "maxDuration": 30
     }
   }
