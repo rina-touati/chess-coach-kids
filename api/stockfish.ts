@@ -25,7 +25,7 @@ type StockfishResult = {
 
 const require = createRequire(import.meta.url)
 const initStockfish = require('stockfish') as (enginePath: string) => Promise<StockfishEngine>
-const enginePath = path.join(process.cwd(), 'vendor', 'stockfish', 'stockfish-18-lite-single.js')
+const enginePath = path.join(process.cwd(), 'vendor', 'stockfish', 'stockfish-18-lite-single.cjs')
 
 let enginePromise: Promise<StockfishEngine> | null = null
 let engineQueue = Promise.resolve()
