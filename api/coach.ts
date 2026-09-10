@@ -328,11 +328,81 @@ function getPracticeRuleMessage(body: CoachRequest): CoachResponse | null {
   const practice = body.practice
 
   if (practice.solved) {
+    if (practice.id === 'mate-two-queen-bishop') {
+      return {
+        text: `${name}, יפה. זה היה מט בשני: קודם הכרחת את המלך לפינה, ואז סגרת לו את כל הבריחות.`,
+        mood: 'good',
+        source: 'rules',
+      }
+    }
+
+    if (practice.title?.includes('מט')) {
+      return {
+        text: `${name}, יפה. זה מט: המלך בשח ואין לו אף משבצת בריחה חוקית.`,
+        mood: 'good',
+        source: 'rules',
+      }
+    }
+
     return {
       text: `${name}, יפה. פתרת את התרגול הזה. עכשיו ננסה להשתמש באותו רעיון גם במשחק אמיתי.`,
       mood: 'good',
       source: 'rules',
     }
+  }
+
+  if (practice.id === 'mate-one-queen-bishop') {
+    return {
+      text: `${name}, זה מט באחד. חפש מסע של המלכה שנותן שח, בזמן שהרץ סוגר בריחה.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'scholars-mate-finish') {
+    return {
+      text: `${name}, זה מט באחד. המלכה והרץ מסתכלים יחד על נקודה חלשה ליד המלך.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'back-rank-rook-mate') {
+    return {
+      text: `${name}, זה מט באחד. המלך תקוע מאחורי הרגלים שלו, אז חפש שח עם הצריח.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'ladder-rook-mate') {
+    return {
+      text: `${name}, זה מט באחד. שני צריחים עובדים כמו סולם וסוגרים את המלך בקצה.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'queen-king-corner-mate') {
+    return {
+      text: `${name}, זה מט באחד. המלך שלך עוזר למלכה, אז חפש שח שסוגר את הפינה.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (practice.id === 'mate-two-queen-bishop') {
+    return (practice.stage ?? 0) === 0
+      ? {
+          text: `${name}, זה מט בשני. קודם צריך שח שמכריח את המלך ללכת לפינה.`,
+          mood: 'idea',
+          source: 'rules',
+        }
+      : {
+          text: `${name}, עכשיו המהלך השני של המט. חפש שח שסוגר למלך את כל הבריחות.`,
+          mood: 'idea',
+          source: 'rules',
+        }
   }
 
   if (practice.id === 'opening-first-pawn-center') {
