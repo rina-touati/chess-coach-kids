@@ -781,7 +781,7 @@ function App() {
           setNameDraft(loadedProfile.displayName)
           setCoach({
             mood: 'idea',
-            text: 'מכין אימון אישי קצר.',
+            text: `${loadedProfile.displayName}, שלום. אפשר להתחיל משחק או לבחור תרגול קצר.`,
           })
         }
       } catch {
