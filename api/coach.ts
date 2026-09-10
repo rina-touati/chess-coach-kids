@@ -12,11 +12,13 @@ import {
 } from './_shared.js'
 
 type CoachRequest = {
-  event: 'move' | 'hint' | 'reset'
+  event: 'move' | 'hint' | 'reset' | 'chat'
   localMessage: string
   fen: string
   pgn: string
   moveCount: number
+  gameId?: string
+  transcript?: string
   move?: {
     from: string
     to: string
@@ -215,35 +217,40 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       },
     }
 
-    const movePayload = {
-      ply: Math.max(1, body.moveCount),
-      color: body.move?.color ?? 'w',
-      from: body.move?.from,
-      to: body.move?.to,
-      san: body.move?.san,
-      fen_after: body.fen,
-      pgn: body.pgn,
-      analysis: body.analysis ?? {},
-      coach_feedback: {
-        text: coach.text,
-        mood: coach.mood,
-        source: coach.source,
-      },
+    let row: { game_id?: string; profile?: unknown } | null = null
+
+    if (body.event === 'move' && body.move) {
+      const movePayload = {
+        ply: Math.max(1, body.moveCount),
+        color: body.move.color,
+        from: body.move.from,
+        to: body.move.to,
+        san: body.move.san,
+        fen_after: body.fen,
+        pgn: body.pgn,
+        analysis: body.analysis ?? {},
+        coach_feedback: {
+          text: coach.text,
+          mood: coach.mood,
+          source: coach.source,
+        },
+      }
+
+      const { data: recorded } = await supabase.rpc('chess_record_move', {
+        p_child_profile_id: auth.childProfileId,
+        p_access_token: auth.accessToken,
+        p_game_id: body.gameId ?? null,
+        p_move: movePayload,
+        p_profile_patch: profilePatch,
+      })
+
+      row = Array.isArray(recorded) ? recorded[0] : null
     }
 
-    const { data: recorded } = await supabase.rpc('chess_record_move', {
-      p_child_profile_id: auth.childProfileId,
-      p_access_token: auth.accessToken,
-      p_game_id: null,
-      p_move: movePayload,
-      p_profile_patch: profilePatch,
-    })
-
-    const row = Array.isArray(recorded) ? recorded[0] : null
     res.status(200).json({
       ...coach,
       profile: row?.profile ?? profilePatch,
-      gameId: row?.game_id,
+      gameId: row?.game_id ?? body.gameId,
     })
   } catch (error) {
     res.status(500).json({

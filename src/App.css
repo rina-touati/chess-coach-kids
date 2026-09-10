@@ -78,7 +78,7 @@ h1 {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -118,12 +118,18 @@ button svg {
   height: 22px;
 }
 
+button.listening {
+  background: #16a34a;
+  box-shadow: 0 12px 26px rgba(22, 163, 74, 0.25);
+}
+
 .board-panel {
   display: flex;
   justify-content: center;
 }
 
 .board-wrap {
+  direction: ltr;
   width: min(68svh, 100%, 620px);
   aspect-ratio: 1;
 }
@@ -191,7 +197,7 @@ button svg {
 
 @media (max-width: 520px) {
   .controls {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   button {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
-import { Lightbulb, RefreshCcw, RotateCcw, Volume2 } from 'lucide-react'
+import { Lightbulb, Mic, RefreshCcw, RotateCcw, Volume2 } from 'lucide-react'
 import './App.css'
 
 type CoachMood = 'good' | 'careful' | 'idea'
@@ -98,6 +98,34 @@ const whitePieceSquareTables = {
 type MoveAnalysis = {
   move: Move
   score: number
+  safetyPenalty: number
+}
+
+type SpeechRecognitionResultEvent = Event & {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string
+      }
+    }
+  }
+}
+
+type SpeechRecognitionConstructor = new () => {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  start(): void
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
 }
 
 function speak(text: string) {
@@ -114,11 +142,15 @@ function speakWithBrowserVoice(text: string) {
 }
 
 async function speakWithServerVoice(text: string) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 1200)
+
   try {
     const response = await fetch('/api/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
+      signal: controller.signal,
     })
 
     if (!response.ok) throw new Error('Speech API failed')
@@ -131,6 +163,8 @@ async function speakWithServerVoice(text: string) {
     await audio.play()
   } catch {
     speakWithBrowserVoice(text)
+  } finally {
+    window.clearTimeout(timeout)
   }
 }
 
@@ -144,6 +178,21 @@ function pieceSquareBonus(piece: keyof typeof pieceValues, square: string, color
   const index = squareIndex(square)
   const tableIndex = color === 'w' ? index : 63 - index
   return whitePieceSquareTables[piece][tableIndex]
+}
+
+function fenForTurn(chess: Chess, turn: 'w' | 'b') {
+  const parts = chess.fen().split(' ')
+  parts[1] = turn
+  parts[3] = '-'
+  return parts.join(' ')
+}
+
+function getMobility(chess: Chess, turn: 'w' | 'b') {
+  try {
+    return new Chess(fenForTurn(chess, turn)).moves().length
+  } catch {
+    return 0
+  }
 }
 
 function evaluateBoard(chess: Chess) {
@@ -164,8 +213,8 @@ function evaluateBoard(chess: Chess) {
     }
   }
 
-  const whiteMobility = new Chess(chess.fen().replace(/ [bw] /, ' w ')).moves().length
-  const blackMobility = new Chess(chess.fen().replace(/ [bw] /, ' b ')).moves().length
+  const whiteMobility = getMobility(chess, 'w')
+  const blackMobility = getMobility(chess, 'b')
   score += (whiteMobility - blackMobility) * 4
 
   return score
@@ -178,6 +227,44 @@ function scoreMoveForOrdering(move: Move) {
   const promotionBonus = move.promotion ? pieceValues[move.promotion] : 0
 
   return captured * 10 - attacker + checkBonus + promotionBonus
+}
+
+function getPieceValueOnSquare(chess: Chess, square: string) {
+  const piece = chess.get(square as Square)
+  return piece ? pieceValues[piece.type] : 0
+}
+
+function getLeastAttackerValue(chess: Chess, square: string, color: 'w' | 'b') {
+  const attackers = chess.attackers(square as Square, color)
+  if (attackers.length === 0) return null
+
+  return Math.min(...attackers.map((attackerSquare) => getPieceValueOnSquare(chess, attackerSquare)))
+}
+
+function getMoveSafetyPenalty(chessAfterMove: Chess, move: Move) {
+  if (move.san.includes('#')) return 0
+
+  const movedPiece = chessAfterMove.get(move.to as Square)
+  if (!movedPiece) return 0
+
+  const enemyColor = movedPiece.color === 'w' ? 'b' : 'w'
+  const ownColor = movedPiece.color
+  const enemyAttackerValue = getLeastAttackerValue(chessAfterMove, move.to, enemyColor)
+
+  if (enemyAttackerValue === null) return 0
+
+  const ownDefenderValue = getLeastAttackerValue(chessAfterMove, move.to, ownColor)
+  const movedPieceValue = move.promotion ? pieceValues[move.promotion] : pieceValues[movedPiece.type]
+
+  if (ownDefenderValue === null) return movedPieceValue + 120
+  if (enemyAttackerValue <= movedPieceValue && ownDefenderValue > enemyAttackerValue) return Math.round(movedPieceValue * 0.65)
+  if (enemyAttackerValue > movedPieceValue && ownDefenderValue > movedPieceValue) return Math.round(movedPieceValue * 0.45)
+
+  return 0
+}
+
+function adjustScoreForSafety(score: number, movingColor: 'w' | 'b', safetyPenalty: number) {
+  return movingColor === 'w' ? score - safetyPenalty : score + safetyPenalty
 }
 
 function minimax(chess: Chess, depth: number, alpha: number, beta: number): number {
@@ -215,9 +302,12 @@ function analyzeLegalMoves(chess: Chess, depth = 2): MoveAnalysis[] {
     .map((move) => {
       const next = new Chess(chess.fen())
       next.move(move)
+      const safetyPenalty = getMoveSafetyPenalty(next, move)
+      const rawScore = minimax(next, depth - 1, -Infinity, Infinity)
       return {
         move,
-        score: minimax(next, depth - 1, -Infinity, Infinity),
+        score: adjustScoreForSafety(rawScore, move.color, safetyPenalty),
+        safetyPenalty,
       }
     })
     .sort((a, b) => (chess.turn() === 'w' ? b.score - a.score : a.score - b.score))
@@ -351,6 +441,8 @@ function App() {
   const [highlightedSquares, setHighlightedSquares] = useState<Record<string, React.CSSProperties>>({})
   const [movesPlayed, setMovesPlayed] = useState(0)
   const [lastMove, setLastMove] = useState<string>('עוד לא התחיל')
+  const [cloudGameId, setCloudGameId] = useState<string | undefined>()
+  const [isListening, setIsListening] = useState(false)
 
   const status = useMemo(() => {
     if (game.isCheckmate()) return game.turn() === 'w' ? 'השחור ניצח' : 'הלבן ניצח'
@@ -387,6 +479,7 @@ function App() {
           fen: nextGame.fen(),
           pgn: nextGame.pgn(),
           moveCount: nextMoveCount,
+          gameId: cloudGameId,
           move: {
             from: playerMove.from,
             to: playerMove.to,
@@ -407,6 +500,8 @@ function App() {
       if (!response.ok) return
 
       const cloudMessage = (await response.json()) as Partial<CoachMessage>
+      const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
+      if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
       if (typeof cloudMessage.text !== 'string') return
 
       updateCoach({
@@ -419,6 +514,88 @@ function App() {
     } catch {
       // The local coach already spoke, so network failures can stay quiet.
     }
+  }
+
+  async function sendVoiceQuestion(transcript: string) {
+    const cleanTranscript = transcript.trim()
+    if (!cleanTranscript) return
+
+    const thinkingMessage: CoachMessage = {
+      mood: 'idea',
+      text: `שמעתי: ${cleanTranscript}. אני חושב רגע.`,
+    }
+    setCoach(thinkingMessage)
+
+    try {
+      const response = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'chat',
+          transcript: cleanTranscript,
+          localMessage: 'אני כאן. תשאל אותי שוב בקצרה ואעזור לך במסע הבא.',
+          fen: game.fen(),
+          pgn: game.pgn(),
+          moveCount: movesPlayed,
+          gameId: cloudGameId,
+          analysis: {
+            scoreLabel: formatScore(evaluateBoard(game)),
+          },
+        }),
+      })
+
+      if (!response.ok) throw new Error('Coach chat failed')
+
+      const answer = (await response.json()) as Partial<CoachMessage> & { gameId?: string }
+      if (answer.gameId) setCloudGameId(answer.gameId)
+      if (typeof answer.text === 'string') {
+        updateCoach({
+          text: answer.text,
+          mood: answer.mood === 'good' || answer.mood === 'careful' || answer.mood === 'idea' ? answer.mood : 'idea',
+        })
+      }
+    } catch {
+      updateCoach({
+        mood: 'careful',
+        text: 'לא הצלחתי לענות עכשיו. נסה שוב בעוד רגע.',
+      })
+    }
+  }
+
+  function startVoiceQuestion() {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
+
+    if (!Recognition) {
+      updateCoach({
+        mood: 'careful',
+        text: 'הדפדפן הזה לא נותן לי לשמוע קול. נסה מכרום בטלפון.',
+      })
+      return
+    }
+
+    const recognition = new Recognition()
+    recognition.lang = 'he-IL'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    setIsListening(true)
+    setCoach({
+      mood: 'idea',
+      text: 'אני מקשיב. תגיד לי שאלה קצרה.',
+    })
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? ''
+      void sendVoiceQuestion(transcript)
+    }
+    recognition.onerror = () => {
+      setIsListening(false)
+      updateCoach({
+        mood: 'careful',
+        text: 'לא שמעתי טוב. נסה לדבר שוב קרוב לטלפון.',
+      })
+    }
+    recognition.onend = () => setIsListening(false)
+    recognition.start()
   }
 
   function onPieceDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
@@ -480,6 +657,7 @@ function App() {
     const freshGame = new Chess()
     setGame(freshGame)
     setMovesPlayed(0)
+    setCloudGameId(undefined)
     setLastMove('עוד לא התחיל')
     setHighlightedSquares({})
     updateCoach({
@@ -510,6 +688,10 @@ function App() {
             <Lightbulb aria-hidden="true" />
             <span>רמז</span>
           </button>
+          <button type="button" onClick={startVoiceQuestion} title="דבר עם המאמן" className={isListening ? 'listening' : undefined}>
+            <Mic aria-hidden="true" />
+            <span>{isListening ? 'מקשיב' : 'דבר'}</span>
+          </button>
           <button type="button" onClick={resetGame} title="משחק חדש">
             <RefreshCcw aria-hidden="true" />
             <span>חדש</span>
@@ -518,7 +700,7 @@ function App() {
       </section>
 
       <section className="board-panel" aria-label="לוח שחמט">
-        <div className="board-wrap">
+        <div className="board-wrap" dir="ltr">
           <Chessboard
             options={{
               id: 'kid-coach-board',
