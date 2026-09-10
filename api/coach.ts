@@ -475,6 +475,95 @@ function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
   return getPracticeRuleMessage(body)
 }
 
+function formatUciMove(move: string | undefined) {
+  if (!move || move.length < 4) return null
+  return `מ${move.slice(0, 2)} אל ${move.slice(2, 4)}`
+}
+
+function getPieceNameFromSan(san: string | undefined) {
+  const pieceLetter = san?.replace(/[+#?!x=]/g, '').trim()[0]
+  if (pieceLetter === 'N') return 'סוס'
+  if (pieceLetter === 'B') return 'רץ'
+  if (pieceLetter === 'R') return 'צריח'
+  if (pieceLetter === 'Q') return 'מלכה'
+  if (pieceLetter === 'K') return 'מלך'
+  return 'רגלי'
+}
+
+function getMoveRuleMessage(body: CoachRequest): CoachResponse {
+  const name = cleanCoachName(body.childName) || 'אלוף'
+  const move = body.move
+  const playedMove = move ? `${getPieceNameFromSan(move.san)} מ${move.from} אל ${move.to}` : 'המסע שלך'
+  const bestMove = formatUciMove(body.analysis?.bestMove)
+  const blackMove = body.gameStatus?.blackMove
+    ? `${getPieceNameFromSan(body.gameStatus.blackMove.san)} מ${body.gameStatus.blackMove.from} אל ${body.gameStatus.blackMove.to}`
+    : null
+  const loss = body.analysis?.loss ?? 0
+  const safetyPenalty = body.analysis?.safetyPenalty ?? 0
+
+  if (body.gameStatus?.isCheck) {
+    return {
+      text: `${name}, אחרי ${playedMove}, השחור נתן שח${blackMove ? ` עם ${blackMove}` : ''}. קודם מוציאים את המלך מסכנה, ואז חושבים על התקפה.`,
+      mood: 'careful',
+      source: 'rules',
+    }
+  }
+
+  if (safetyPenalty > 250) {
+    return {
+      text: `${name}, ${playedMove} משאיר כלי בסכנה. לפני שמזיזים, בודקים מי יכול לאכול אותו והאם יש לו שומר.`,
+      mood: 'careful',
+      source: 'rules',
+    }
+  }
+
+  if (loss > 450 && bestMove) {
+    return {
+      text: `${name}, ${playedMove} היה חוקי, אבל מנוע השחמט מציע מסע חזק יותר: ${bestMove}. לפני המסע הבא בדוק שח, לקיחה ואיום.`,
+      mood: 'careful',
+      source: 'rules',
+    }
+  }
+
+  if (move?.san?.includes('x')) {
+    return {
+      text: `${name}, ${playedMove} לקח כלי. עכשיו חשוב לבדוק אם הכלי שלקח נשאר מוגן אחרי תגובת השחור.`,
+      mood: 'good',
+      source: 'rules',
+    }
+  }
+
+  if (move?.san?.includes('+')) {
+    return {
+      text: `${name}, ${playedMove} נתן שח. זה טוב כי הכרחת תגובה, אבל עכשיו צריך לבדוק מה השחור מאיים.`,
+      mood: 'good',
+      source: 'rules',
+    }
+  }
+
+  if ((body.moveCount ?? 0) <= 8) {
+    return {
+      text: `${name}, ${playedMove} הוא מסע פתיחה. בפתיחה מחפשים שלושה דברים: מרכז, פיתוח כלים, ומלך בטוח.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  if (bestMove) {
+    return {
+      text: `${name}, ${playedMove} חוקי. רעיון שכדאי לבדוק עכשיו הוא ${bestMove}, ואז לשאול מה השחור מאיים.`,
+      mood: 'idea',
+      source: 'rules',
+    }
+  }
+
+  return {
+    text: `${name}, ${playedMove} חוקי. לפני המסע הבא בדוק מה השחור מאיים ואיזה כלי שלך לא מוגן.`,
+    mood: 'idea',
+    source: 'rules',
+  }
+}
+
 async function generateCoachMessage(body: CoachRequest, profile: Record<string, unknown>): Promise<CoachResponse> {
   const forcedMessage = getForcedGameStatusMessage(body)
   if (forcedMessage) return forcedMessage
@@ -483,11 +572,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
   if (ruleMessage) return ruleMessage
 
   if (body.event === 'move') {
-    return {
-      text: body.localMessage,
-      mood: body.analysis?.loss && body.analysis.loss > 150 ? 'careful' : 'idea',
-      source: 'rules',
-    }
+    return getMoveRuleMessage(body)
   }
 
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
