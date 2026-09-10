@@ -57,7 +57,40 @@ function moveFromUci(chess: Chess, uci: string | null) {
 
 function formatMove(move: Move | null | undefined) {
   if (!move) return null
-  return `${pieceNames[move.piece]} מ${move.from} אל ${move.to}`
+  return pieceNames[move.piece]
+}
+
+function movedFromHome(move: Move) {
+  if (move.color !== 'w') return false
+  if (move.piece === 'n') return move.from === 'b1' || move.from === 'g1'
+  if (move.piece === 'b') return move.from === 'c1' || move.from === 'f1'
+  if (move.piece === 'q') return move.from === 'd1'
+  if (move.piece === 'r') return move.from === 'a1' || move.from === 'h1'
+  return false
+}
+
+function isCenterMove(move: Move) {
+  return ['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5'].includes(move.to)
+}
+
+function openingExplanation(move: Move) {
+  if (move.piece === 'n' && movedFromHome(move)) {
+    return 'יופי, הוצאת סוס מהבית. עכשיו הוא קרוב לאמצע הלוח ועוזר לחברים שלו.'
+  }
+
+  if (move.piece === 'b' && movedFromHome(move)) {
+    return 'יופי, הוצאת רץ מהבית. רץ אוהב קו פתוח כדי לראות רחוק על הלוח.'
+  }
+
+  if (move.piece === 'p' && isCenterMove(move)) {
+    return 'יופי, הזזת רגלי לאמצע. מי ששולט באמצע מקבל יותר מקום לכלים.'
+  }
+
+  if (move.piece === 'q' && movedFromHome(move)) {
+    return 'המלכה חזקה, אבל בתחילת המשחק לא כדאי להוציא אותה מהר מדי. קודם עדיף להוציא סוסים ורצים.'
+  }
+
+  return 'זה מסע חוקי. בתחילת המשחק אנחנו רוצים להוציא סוסים ורצים, לתפוס את האמצע, ולשמור על המלך.'
 }
 
 function getPieceValueOnSquare(chess: Chess, square: string) {
@@ -127,48 +160,48 @@ function buildMoveCoachText(args: {
   if (args.finalGame.isCheck()) {
     return {
       mood: 'careful' as const,
-      text: `${args.childName}, אחרי ${played}, השחור נתן שח${black ? ` עם ${black}` : ''}. עכשיו קודם מצילים את המלך, ורק אחר כך חושבים על התקפה.`,
+      text: `${args.childName}, השחור נתן שח${black ? ` עם ${black}` : ''}. כשהמלך בסכנה, קודם מצילים אותו. התקפה באה אחר כך.`,
     }
   }
 
   if (args.safetyPenalty > 250) {
     return {
       mood: 'careful' as const,
-      text: `${args.childName}, ${played} משאיר כלי בסכנה. לפני שמזיזים כלי, בודקים מי יכול לאכול אותו והאם יש לו שומר.`,
+      text: `${args.childName}, ה${played} נשאר במקום מסוכן. לפני שמזיזים כלי, שואלים: מי יכול לאכול אותו, ומי שומר עליו?`,
     }
   }
 
   if (args.playerMove.san.includes('x')) {
     return {
       mood: 'good' as const,
-      text: `${args.childName}, ${played} לקח כלי. עכשיו השאלה החשובה היא אם הכלי שלקח נשאר מוגן אחרי התגובה של השחור.`,
+      text: `${args.childName}, יפה, ה${played} לקח כלי. עכשיו בודקים אם הוא נשאר מוגן או שהשחור יכול לאכול אותו בחזרה.`,
     }
   }
 
   if (args.playerMove.san.includes('+')) {
     return {
       mood: 'good' as const,
-      text: `${args.childName}, ${played} נתן שח. זה מאלץ את היריב להגיב, אבל אחרי שח תמיד בודקים מה נשאר לא מוגן אצלנו.`,
+      text: `${args.childName}, נתת שח. זה אומר שהמלך השחור חייב לענות מיד. עכשיו נבדוק מה השחור יכול לעשות בחזרה.`,
     }
   }
 
   if (args.lessonSkill === 'opening' || args.moveCount <= 8) {
     return {
       mood: 'idea' as const,
-      text: `${args.childName}, ${played} הוא מסע פתיחה. בפתיחה מחפשים מרכז, פיתוח כלים, ומלך בטוח.`,
+      text: `${args.childName}, ${openingExplanation(args.playerMove)} במסע הבא ננסה להוציא עוד כלי או להכין מקום בטוח למלך.`,
     }
   }
 
   if (best) {
     return {
       mood: 'idea' as const,
-      text: `${args.childName}, ${played} חוקי. רעיון שכדאי לבדוק הוא ${best}, ואז לשאול מה השחור מאיים.`,
+      text: `${args.childName}, המסע חוקי. עכשיו כדאי לחפש רעיון פעיל: שח, לקיחה, או איום על כלי של השחור.`,
     }
   }
 
   return {
     mood: 'idea' as const,
-    text: `${args.childName}, ${played} חוקי. לפני המסע הבא חפש איום של השחור וכלי לבן שלא מוגן.`,
+    text: `${args.childName}, המסע חוקי. לפני המסע הבא נעצור רגע ונשאל: מה השחור מאיים, ואיזה כלי שלי צריך שמירה?`,
   }
 }
 

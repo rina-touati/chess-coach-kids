@@ -477,7 +477,7 @@ function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
 
 function formatUciMove(move: string | undefined) {
   if (!move || move.length < 4) return null
-  return `מ${move.slice(0, 2)} אל ${move.slice(2, 4)}`
+  return 'מסע אחר'
 }
 
 function getPieceNameFromSan(san: string | undefined) {
@@ -493,17 +493,17 @@ function getPieceNameFromSan(san: string | undefined) {
 function getMoveRuleMessage(body: CoachRequest): CoachResponse {
   const name = cleanCoachName(body.childName) || 'אלוף'
   const move = body.move
-  const playedMove = move ? `${getPieceNameFromSan(move.san)} מ${move.from} אל ${move.to}` : 'המסע שלך'
+  const playedPiece = move ? getPieceNameFromSan(move.san) : 'הכלי'
   const bestMove = formatUciMove(body.analysis?.bestMove)
   const blackMove = body.gameStatus?.blackMove
-    ? `${getPieceNameFromSan(body.gameStatus.blackMove.san)} מ${body.gameStatus.blackMove.from} אל ${body.gameStatus.blackMove.to}`
+    ? getPieceNameFromSan(body.gameStatus.blackMove.san)
     : null
   const loss = body.analysis?.loss ?? 0
   const safetyPenalty = body.analysis?.safetyPenalty ?? 0
 
   if (body.gameStatus?.isCheck) {
     return {
-      text: `${name}, אחרי ${playedMove}, השחור נתן שח${blackMove ? ` עם ${blackMove}` : ''}. קודם מוציאים את המלך מסכנה, ואז חושבים על התקפה.`,
+      text: `${name}, השחור נתן שח${blackMove ? ` עם ${blackMove}` : ''}. כשהמלך בסכנה, קודם מצילים אותו. התקפה באה אחר כך.`,
       mood: 'careful',
       source: 'rules',
     }
@@ -511,7 +511,7 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if (safetyPenalty > 250) {
     return {
-      text: `${name}, ${playedMove} משאיר כלי בסכנה. לפני שמזיזים, בודקים מי יכול לאכול אותו והאם יש לו שומר.`,
+      text: `${name}, ה${playedPiece} נשאר במקום מסוכן. לפני שמזיזים כלי, שואלים מי יכול לאכול אותו ומי שומר עליו.`,
       mood: 'careful',
       source: 'rules',
     }
@@ -519,7 +519,7 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if (loss > 450 && bestMove) {
     return {
-      text: `${name}, ${playedMove} היה חוקי, אבל מנוע השחמט מציע מסע חזק יותר: ${bestMove}. לפני המסע הבא בדוק שח, לקיחה ואיום.`,
+      text: `${name}, המסע חוקי, אבל היה רעיון חזק יותר. לפני המסע הבא בדוק שח, לקיחה ואיום.`,
       mood: 'careful',
       source: 'rules',
     }
@@ -527,7 +527,7 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if (move?.san?.includes('x')) {
     return {
-      text: `${name}, ${playedMove} לקח כלי. עכשיו חשוב לבדוק אם הכלי שלקח נשאר מוגן אחרי תגובת השחור.`,
+      text: `${name}, יפה, ה${playedPiece} לקח כלי. עכשיו בודקים אם הוא נשאר מוגן או שהשחור יכול לאכול אותו בחזרה.`,
       mood: 'good',
       source: 'rules',
     }
@@ -535,7 +535,7 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if (move?.san?.includes('+')) {
     return {
-      text: `${name}, ${playedMove} נתן שח. זה טוב כי הכרחת תגובה, אבל עכשיו צריך לבדוק מה השחור מאיים.`,
+      text: `${name}, נתת שח. זה אומר שהמלך השחור חייב לענות מיד. עכשיו נבדוק מה השחור יכול לעשות בחזרה.`,
       mood: 'good',
       source: 'rules',
     }
@@ -543,7 +543,7 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if ((body.moveCount ?? 0) <= 8) {
     return {
-      text: `${name}, ${playedMove} הוא מסע פתיחה. בפתיחה מחפשים שלושה דברים: מרכז, פיתוח כלים, ומלך בטוח.`,
+      text: `${name}, זה מסע פתיחה. בתחילת המשחק מוציאים סוסים ורצים, תופסים את האמצע, ושומרים על המלך.`,
       mood: 'idea',
       source: 'rules',
     }
@@ -551,14 +551,14 @@ function getMoveRuleMessage(body: CoachRequest): CoachResponse {
 
   if (bestMove) {
     return {
-      text: `${name}, ${playedMove} חוקי. רעיון שכדאי לבדוק עכשיו הוא ${bestMove}, ואז לשאול מה השחור מאיים.`,
+      text: `${name}, המסע חוקי. עכשיו כדאי לחפש רעיון פעיל: שח, לקיחה, או איום על כלי של השחור.`,
       mood: 'idea',
       source: 'rules',
     }
   }
 
   return {
-    text: `${name}, ${playedMove} חוקי. לפני המסע הבא בדוק מה השחור מאיים ואיזה כלי שלך לא מוגן.`,
+    text: `${name}, המסע חוקי. לפני המסע הבא נעצור רגע ונשאל מה השחור מאיים ואיזה כלי שלי צריך שמירה.`,
     mood: 'idea',
     source: 'rules',
   }
