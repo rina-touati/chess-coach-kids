@@ -33,6 +33,18 @@ type CoachRequest = {
     loss?: number
     scoreLabel?: string
   }
+  gameStatus?: {
+    isCheckmate?: boolean
+    isDraw?: boolean
+    isCheck?: boolean
+    turn?: 'w' | 'b'
+    winner?: 'white' | 'black' | null
+    blackMove?: {
+      from: string
+      to: string
+      san?: string
+    } | null
+  }
 }
 
 type CoachResponse = {
@@ -141,7 +153,38 @@ function isCleanHebrewCoachText(text: string) {
   return true
 }
 
+function getForcedGameStatusMessage(body: CoachRequest): CoachResponse | null {
+  if (body.gameStatus?.isCheckmate) {
+    if (body.gameStatus.winner === 'white') {
+      return {
+        text: 'זה מט. הלבן ניצח. מעולה, המלך השחור כבר לא יכול לברוח.',
+        mood: 'good',
+        source: 'fallback',
+      }
+    }
+
+    return {
+      text: 'זה מט. השחור ניצח הפעם. בוא נבדוק איך המלך נשאר בלי בריחה.',
+      mood: 'careful',
+      source: 'fallback',
+    }
+  }
+
+  if (body.gameStatus?.isDraw) {
+    return {
+      text: 'זה תיקו. אף צד לא יכול לנצח מכאן, אז אפשר להתחיל משחק חדש.',
+      mood: 'idea',
+      source: 'fallback',
+    }
+  }
+
+  return null
+}
+
 async function generateCoachMessage(body: CoachRequest, profile: Record<string, unknown>): Promise<CoachResponse> {
+  const forcedMessage = getForcedGameStatusMessage(body)
+  if (forcedMessage) return forcedMessage
+
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
   const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
 
@@ -151,7 +194,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no notation-heavy explanation, no shame, no long lecture.',
+          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Avoid generic phrases like "think about a move to win"; give one concrete reason from the current board, the move, the threat, or the analysis. If event is chat, answer the child question directly using the current position.',
       },
       {
         role: 'user',

@@ -159,6 +159,7 @@ async function speakWithServerVoice(text: string) {
     const blob = await response.blob()
     const audioUrl = URL.createObjectURL(blob)
     const audio = new Audio(audioUrl)
+    audio.playbackRate = 1.18
     audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), { once: true })
     await audio.play()
   } catch {
@@ -408,6 +409,36 @@ function getCoachMessage(move: Move, chess: Chess, bestBeforeMove: MoveAnalysis 
   }
 }
 
+function getGameOverMessage(chess: Chess): CoachMessage | null {
+  if (chess.isCheckmate()) {
+    return chess.turn() === 'w'
+      ? {
+          mood: 'careful',
+          text: 'זה מט. השחור ניצח הפעם. בוא נבדוק איך המלך נשאר בלי בריחה.',
+        }
+      : {
+          mood: 'good',
+          text: `וואו ${kidName}! זה מט. ניצחת במשחק.`,
+        }
+  }
+
+  if (chess.isDraw()) {
+    return {
+      mood: 'idea',
+      text: 'זה תיקו. אף צד לא יכול לנצח מכאן, אז אפשר להתחיל משחק חדש ולנסות רעיון אחר.',
+    }
+  }
+
+  return null
+}
+
+function getCheckMessage(): CoachMessage {
+  return {
+    mood: 'careful',
+    text: 'זה שח. עכשיו הדבר הראשון הוא לשמור על המלך ולמצוא בריחה טובה.',
+  }
+}
+
 function pickBlackMove(chess: Chess) {
   const analyses = analyzeLegalMoves(chess, 3)
   return analyses[0]?.move ?? null
@@ -463,6 +494,8 @@ function App() {
     bestBeforeMove: MoveAnalysis | undefined,
     playedAnalysis: MoveAnalysis | undefined,
     nextMoveCount: number,
+    blackMove: Move | null,
+    lockLocalMessage = false,
   ) {
     const loss =
       bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
@@ -494,6 +527,20 @@ function App() {
             loss,
             scoreLabel: formatScore(evaluateBoard(nextGame)),
           },
+          gameStatus: {
+            isCheckmate: nextGame.isCheckmate(),
+            isDraw: nextGame.isDraw(),
+            isCheck: nextGame.isCheck(),
+            turn: nextGame.turn(),
+            winner: nextGame.isCheckmate() ? (nextGame.turn() === 'w' ? 'black' : 'white') : null,
+            blackMove: blackMove
+              ? {
+                  from: blackMove.from,
+                  to: blackMove.to,
+                  san: blackMove.san,
+                }
+              : null,
+          },
         }),
       })
 
@@ -502,6 +549,7 @@ function App() {
       const cloudMessage = (await response.json()) as Partial<CoachMessage>
       const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
       if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
+      if (lockLocalMessage) return
       if (typeof cloudMessage.text !== 'string') return
 
       updateCoach({
@@ -540,6 +588,14 @@ function App() {
           gameId: cloudGameId,
           analysis: {
             scoreLabel: formatScore(evaluateBoard(game)),
+          },
+          gameStatus: {
+            isCheckmate: game.isCheckmate(),
+            isDraw: game.isDraw(),
+            isCheck: game.isCheck(),
+            turn: game.turn(),
+            winner: game.isCheckmate() ? (game.turn() === 'w' ? 'black' : 'white') : null,
+            blackMove: null,
           },
         }),
       })
@@ -630,19 +686,29 @@ function App() {
       [playerMove.to]: { background: '#86efac' },
     })
 
-    const message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis)
+    let message = getCoachMessage(playerMove, nextGame, bestBeforeMove, playedAnalysis)
+    let blackMove: Move | null = null
 
     if (!nextGame.isGameOver()) {
-      const blackMove = pickBlackMove(nextGame)
+      blackMove = pickBlackMove(nextGame)
       if (blackMove) {
         nextGame.move({ from: blackMove.from, to: blackMove.to, promotion: 'q' })
         setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: ${blackMove.from} אל ${blackMove.to}`)
       }
     }
 
+    const terminalMessage = getGameOverMessage(nextGame)
+    let lockLocalMessage = Boolean(terminalMessage)
+    if (terminalMessage) {
+      message = terminalMessage
+    } else if (blackMove && nextGame.isCheck()) {
+      message = getCheckMessage()
+      lockLocalMessage = true
+    }
+
     setGame(nextGame)
     updateCoach(message)
-    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount)
+    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage)
     return true
   }
 
