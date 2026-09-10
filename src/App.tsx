@@ -1243,7 +1243,7 @@ function App() {
         [best.from]: { background: '#facc15' },
         [best.to]: { background: '#22c55e' },
       })
-      void requestContextCoach('hint', `${childName}, תן רמז קצר לפי Stockfish: ${best.from} אל ${best.to}.`, childName, game, movesPlayed)
+      void requestContextCoach('hint', `${childName}, תן רמז קצר לפי מנוע השחמט: ${best.from} אל ${best.to}.`, childName, game, movesPlayed)
     } catch {
       const hint = getHint(game)
       setHighlightedSquares(hint.squares)
