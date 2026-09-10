@@ -10,6 +10,7 @@ import {
 type PracticeRequest = {
   puzzleId?: string
   puzzleTitle?: string
+  skill?: 'opening' | 'tactics' | 'safety' | 'endgame' | 'focus'
   solved?: boolean
 }
 
@@ -38,6 +39,14 @@ function bumpScore(value: unknown, amount: number) {
   return Math.max(1, Math.min(100, Math.round(current + amount)))
 }
 
+const skillLabels = {
+  opening: 'פיתוח כלים בפתיחה',
+  tactics: 'טקטיקה ואיומים',
+  safety: 'שמירה על כלים',
+  endgame: 'סיום משחק ומט',
+  focus: 'ריכוז לפני מסע',
+} as const
+
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   setJsonHeaders(res)
 
@@ -55,6 +64,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const body = parseJsonBody<PracticeRequest>(req)
     const puzzleId = cleanId(body.puzzleId)
+    const skill = body.skill && body.skill in skillLabels ? body.skill : 'tactics'
     if (!puzzleId || !body.solved) {
       res.status(400).json({ error: 'Missing solved puzzle' })
       return
@@ -76,14 +86,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       p_profile_patch: {
         skill_scores: {
           ...currentScores,
-          tactics: bumpScore(currentScores.tactics, 3),
+          [skill]: bumpScore(currentScores[skill], 3),
           focus: bumpScore(currentScores.focus, 2),
-          endgame: bumpScore(currentScores.endgame, 2),
         },
         summary: {
           last_event: 'practice',
           last_feedback: body.puzzleTitle ? `Solved practice: ${body.puzzleTitle}` : 'Solved practice',
-          weakest_skill_label: 'טקטיקה ואיומים',
+          weakest_skill_label: skillLabels[skill],
           practice_progress: {
             ...currentPracticeProgress,
             [puzzleId]: {

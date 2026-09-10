@@ -34,10 +34,13 @@ type SkillKey = 'opening' | 'tactics' | 'safety' | 'endgame' | 'focus'
 type PracticePuzzle = {
   id: string
   title: string
+  level: 'starter' | 'builder'
+  skill: SkillKey
   goal: string
   fen: string
   firstMove: { from: Square; to: Square }
-  forcedReply: string
+  completion: 'after-first' | 'mate-after-reply'
+  forcedReply?: string
 }
 
 const fallbackKidName = 'אלוף'
@@ -79,11 +82,34 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
 
 const practicePuzzles: PracticePuzzle[] = [
   {
+    id: 'opening-knight-center',
+    title: 'פתיחה: להוציא סוס',
+    level: 'starter',
+    skill: 'opening',
+    goal: 'מוציאים סוס למשחק כדי לעזור לשלוט במרכז.',
+    fen: 'rn1qkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    firstMove: { from: 'g1', to: 'f3' },
+    completion: 'after-first',
+  },
+  {
+    id: 'mate-one-queen-bishop',
+    title: 'מט באחד',
+    level: 'starter',
+    skill: 'endgame',
+    goal: 'מחפשים מסע אחד שסוגר את כל הבריחות של המלך.',
+    fen: '6k1/5ppp/8/8/2B4Q/8/5PPP/6K1 w - - 0 1',
+    firstMove: { from: 'h4', to: 'd8' },
+    completion: 'after-first',
+  },
+  {
     id: 'mate-two-queen-bishop',
     title: 'מט בשני שלבים',
+    level: 'builder',
+    skill: 'tactics',
     goal: 'קודם נותנים שח עם המלכה, ואז מוצאים מט.',
     fen: '6k1/5ppp/8/7Q/2B5/8/5PPP/6K1 w - - 0 1',
     firstMove: { from: 'h5', to: 'f7' },
+    completion: 'mate-after-reply',
     forcedReply: 'Kh8',
   },
 ]
@@ -219,7 +245,7 @@ function speakWithBrowserVoice(text: string) {
 
 async function speakWithServerVoice(text: string) {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 1200)
+  const timeout = window.setTimeout(() => controller.abort(), 9000)
 
   try {
     const response = await fetch('/api/speech', {
@@ -667,7 +693,13 @@ function App() {
     speak(message.text)
   }
 
-  async function requestContextCoach(event: 'reset' | 'practice', fallbackText: string, nameOverride?: string, contextGame = game, contextMoveCount = movesPlayed) {
+  async function requestContextCoach(
+    event: 'reset' | 'practice' | 'onboarding',
+    fallbackText: string,
+    nameOverride?: string,
+    contextGame = game,
+    contextMoveCount = movesPlayed,
+  ) {
     const thinkingMessage: CoachMessage = {
       mood: 'idea',
       text: 'מכין אימון אישי קצר.',
@@ -735,7 +767,11 @@ function App() {
       const savedProfile = normalizeProfilePayload(data.profile)
       if (savedProfile) {
         setProfile(savedProfile)
-        void requestContextCoach('reset', `${savedProfile.displayName ?? displayName}, נתחיל מהפתיחה ונבחר כלי טוב למרכז.`, savedProfile.displayName ?? displayName)
+        void requestContextCoach(
+          'onboarding',
+          `${savedProfile.displayName ?? displayName}, ברוך הבא למאמן השחמט. אפשר להתחיל משחק או תרגול קצר.`,
+          savedProfile.displayName ?? displayName,
+        )
       }
     } catch {
       updateCoach({
@@ -899,6 +935,7 @@ function App() {
         body: JSON.stringify({
           puzzleId: puzzle.id,
           puzzleTitle: puzzle.title,
+          skill: puzzle.skill,
           solved: true,
         }),
       })
@@ -911,16 +948,28 @@ function App() {
     }
   }
 
-  function startPractice() {
-    const puzzle = practicePuzzles[0]
+  function startPractice(selectedPuzzle = practicePuzzles[0]) {
+    const puzzle = selectedPuzzle
     const puzzleGame = new Chess(puzzle.fen)
     setActivePuzzle({ puzzle, stage: 0 })
     setGame(puzzleGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
-    setLastMove('תרגול: מט בשני')
+    setLastMove(`תרגול: ${puzzle.title}`)
     setHighlightedSquares({})
     void requestContextCoach('practice', `${childName}, תרגול. ${puzzle.goal}`, childName, puzzleGame, 0)
+  }
+
+  function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move) {
+    setGame(nextGame)
+    setActivePuzzle(null)
+    setLastMove(`${playerMove.from} אל ${playerMove.to}; הושלם`)
+    setHighlightedSquares({
+      [playerMove.from]: { background: '#bfdbfe' },
+      [playerMove.to]: { background: '#22c55e' },
+    })
+    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${puzzle.title}.`, childName, nextGame, 1)
+    void recordPracticeProgress(puzzle)
   }
 
   function handlePracticeDrop(sourceSquare: string, targetSquare: string) {
@@ -951,6 +1000,12 @@ function App() {
         return false
       }
 
+      if (activePuzzle.puzzle.completion === 'after-first') {
+        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove)
+        return true
+      }
+
+      if (!activePuzzle.puzzle.forcedReply) return false
       nextGame.move(activePuzzle.puzzle.forcedReply)
       setGame(nextGame)
       setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: 1 })
@@ -975,7 +1030,7 @@ function App() {
       [playerMove.from]: { background: '#bfdbfe' },
       [playerMove.to]: { background: '#22c55e' },
     })
-    void requestContextCoach('practice', `${childName}, הפאזל נפתר. זה היה מט בשני שלבים.`, childName, nextGame, 2)
+    void requestContextCoach('practice', `${childName}, השיעור הושלם: ${activePuzzle.puzzle.title}.`, childName, nextGame, 2)
     void recordPracticeProgress(activePuzzle.puzzle)
     return true
   }
@@ -1189,7 +1244,7 @@ function App() {
             <Lightbulb aria-hidden="true" />
             <span>רמז</span>
           </button>
-          <button type="button" onClick={startPractice} title="תרגול">
+          <button type="button" onClick={() => startPractice()} title="תרגול">
             <Target aria-hidden="true" />
             <span>תרגול</span>
           </button>
@@ -1268,11 +1323,12 @@ function App() {
             <button
               type="button"
               className={practiceProgress[puzzle.id]?.solved ? 'lesson-step solved' : 'lesson-step'}
-              onClick={startPractice}
+              onClick={() => startPractice(puzzle)}
               key={puzzle.id}
             >
               <span>{index + 1}</span>
               <strong>{puzzle.title}</strong>
+              <small>{puzzle.level === 'starter' ? 'מתחיל' : 'יודע קצת'}</small>
             </button>
           ))}
         </div>

@@ -331,6 +331,17 @@ button.listening {
   line-height: 1.2;
 }
 
+.lesson-step small {
+  margin-inline-start: auto;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.lesson-step:hover small {
+  color: #dbeafe;
+}
+
 .skill-meter {
   display: grid;
   gap: 8px;

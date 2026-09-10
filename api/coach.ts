@@ -12,7 +12,7 @@ import {
 } from './_shared.js'
 
 type CoachRequest = {
-  event: 'move' | 'hint' | 'reset' | 'chat' | 'practice'
+  event: 'move' | 'hint' | 'reset' | 'chat' | 'practice' | 'onboarding'
   localMessage: string
   fen: string
   pgn: string
@@ -94,7 +94,7 @@ function buildTrainingFocus(body: CoachRequest) {
   const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
   const tags: string[] = []
 
-    if (body.gameStatus?.isCheckmate) tags.push('checkmate')
+  if (body.gameStatus?.isCheckmate) tags.push('checkmate')
   if (body.gameStatus?.isCheck) tags.push('check')
   if (loss > 500) tags.push('big_blunder')
   else if (loss > 150) tags.push('inaccuracy')
@@ -104,11 +104,15 @@ function buildTrainingFocus(body: CoachRequest) {
   if ((body.moveCount ?? 0) <= 8) tags.push('opening')
   if ((body.moveCount ?? 0) >= 22) tags.push('endgame')
   if (body.event === 'practice') tags.push('practice')
+  if (body.event === 'onboarding') tags.push('onboarding')
 
   let topic = 'focus' as keyof typeof skillLabels
   let nextQuestion = 'מה היריב מאיים לעשות עכשיו?'
 
-  if (body.event === 'practice') {
+  if (body.event === 'onboarding') {
+    topic = 'opening'
+    nextQuestion = 'רוצה להתחיל משחק או תרגול קצר?'
+  } else if (body.event === 'practice') {
     topic = 'tactics'
     nextQuestion = 'איזה מסע יוצר איום מט?'
   } else if (body.gameStatus?.isCheckmate) {
@@ -293,7 +297,7 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
       {
         role: 'system',
         content:
-          'You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Return only short JSON with text and mood. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is chat, answer the child question directly using the current position. If event is practice, explain the puzzle goal and what pattern to look for.',
+          'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. The text must be clean modern Hebrew using Hebrew letters only, 1-2 short spoken sentences, no English letters, no Arabic letters, no transliteration, no shame, no long lecture. The board facts in gameEvent are binding: if checkmate, draw, check, or winner is supplied, mention that exact fact first and never praise as if the game continues. Never give generic praise. Never invent threats: in the starting position say it is the opening and focus on developing knights/bishops and the center, not on immediate threats. For every move, be practical in this order: what happened, what was better if bestMove exists, and one simple thinking question for next time. If the move is bad, do not say "great", "nice", or "well done"; be kind but direct. Prefer the child name when available. If event is onboarding, welcome the child by name and ask whether to start a game or a short practice; do not give a chess move tip yet. If event is chat, answer the child question directly using the current position. If event is practice, explain the puzzle goal and what pattern to look for.',
       },
       {
         role: 'user',
@@ -317,10 +321,11 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
 
   const parsed = safeParseJson(response.output_text)
   const parsedText = typeof parsed?.text === 'string' ? parsed.text.trim() : ''
-  const text = parsedText && isCleanHebrewCoachText(parsedText) ? parsedText : body.localMessage
+  const usedOpenAiText = Boolean(parsedText && isCleanHebrewCoachText(parsedText))
+  const text = usedOpenAiText ? parsedText : body.localMessage
   const mood = parsed?.mood === 'good' || parsed?.mood === 'careful' || parsed?.mood === 'idea' ? parsed.mood : 'idea'
 
-  return { text, mood, source: 'openai' }
+  return { text, mood, source: usedOpenAiText ? 'openai' : 'fallback' }
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
