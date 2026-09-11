@@ -9,9 +9,7 @@
   padding: 20px;
 }
 
-.coach-panel,
-.parent-panel,
-.progress-panel {
+.coach-panel {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 8px;
@@ -95,8 +93,7 @@ h1 {
   background: #f8fafc;
 }
 
-.training-card div,
-.progress-intro div {
+.training-card div {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -105,8 +102,7 @@ h1 {
   font-weight: 900;
 }
 
-.training-card svg,
-.progress-intro svg {
+.training-card svg {
   width: 18px;
   height: 18px;
 }
@@ -117,8 +113,7 @@ h1 {
   line-height: 1.1;
 }
 
-.training-card p,
-.progress-intro p {
+.training-card p {
   margin: 0;
   color: #475569;
   font-weight: 800;
@@ -235,181 +230,6 @@ button.listening {
   aspect-ratio: 1;
 }
 
-.parent-panel {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 14px;
-}
-
-.parent-panel div {
-  min-height: 62px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.parent-panel span {
-  color: #64748b;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.parent-panel strong {
-  color: #172033;
-  font-size: 18px;
-}
-
-.parent-panel button {
-  padding: 0 18px;
-}
-
-.progress-panel {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(220px, 300px) minmax(180px, 280px) 1fr;
-  gap: 14px;
-  padding: 16px;
-}
-
-.progress-intro {
-  display: grid;
-  align-content: center;
-  gap: 8px;
-}
-
-.skill-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.lesson-strip {
-  display: grid;
-  gap: 10px;
-  align-content: center;
-  max-height: 280px;
-  overflow: auto;
-  padding-inline-end: 2px;
-}
-
-.parent-report {
-  display: grid;
-  gap: 8px;
-}
-
-.parent-report div {
-  display: grid;
-  gap: 3px;
-  padding: 10px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-.parent-report span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.parent-report strong {
-  color: #172033;
-  font-size: 16px;
-  line-height: 1.2;
-}
-
-.lesson-step {
-  min-height: 58px;
-  justify-content: flex-start;
-  padding: 8px 10px;
-  background: #f8fafc;
-  color: #172033;
-  border: 1px solid #cbd5e1;
-}
-
-.lesson-step:hover {
-  color: #ffffff;
-}
-
-.lesson-step span {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: #dbeafe;
-  color: #172033;
-  font-weight: 900;
-}
-
-.lesson-step.solved {
-  border-color: #22c55e;
-  background: #dcfce7;
-}
-
-.lesson-step strong {
-  min-width: 0;
-  font-size: 15px;
-  line-height: 1.2;
-}
-
-.lesson-step small {
-  margin-inline-start: auto;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.lesson-step:hover small {
-  color: #dbeafe;
-}
-
-.skill-meter {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 10px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid transparent;
-}
-
-.skill-meter.needs-work {
-  background: #fff7ed;
-  border-color: #fb923c;
-}
-
-.skill-meter div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.skill-meter span {
-  min-width: 0;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.skill-meter strong {
-  color: #172033;
-  font-size: 18px;
-}
-
-.skill-meter meter {
-  width: 100%;
-  height: 10px;
-}
-
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -435,18 +255,6 @@ button.listening {
     width: min(94vw, 560px);
   }
 
-  .parent-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .progress-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .skill-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
 }
 
 @media (max-width: 520px) {
@@ -456,10 +264,6 @@ button.listening {
 
   button {
     min-height: 50px;
-  }
-
-  .skill-grid {
-    grid-template-columns: 1fr;
   }
 
 }
