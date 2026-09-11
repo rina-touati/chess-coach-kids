@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
 import { Lightbulb, Mic, Play, Target, Volume2 } from 'lucide-react'
+import { lichessMateLessons, type LichessPuzzleSeed } from './puzzles/lichessMateLessons'
 import './App.css'
 
 type CoachMood = 'good' | 'careful' | 'idea'
@@ -69,16 +70,11 @@ type PracticePuzzle = {
   skill: SkillKey
   goal: string
   fen: string
-  firstMove: { from: Square; to: Square }
-  completion: 'after-first' | 'mate-after-reply'
-  forcedReply?: string
-  steps?: {
-    move: { from: Square; to: Square }
-    reply?: string
-    success: string
-    prompt: string
-    lastMoveLabel?: string
-  }[]
+  solution: string[]
+  mateIn: number
+  rating: number
+  themes: string[]
+  source: 'lichess'
 }
 
 const fallbackKidName = 'אלוף'
@@ -116,98 +112,94 @@ const practicePlans: Record<SkillKey, { title: string; question: string; parentN
   },
 }
 
-const practicePuzzles: PracticePuzzle[] = [
-  {
-    id: 'mate-one-queen-bishop',
-    title: 'שיעור מט: סוגרים בריחה',
-    level: 'starter',
-    skill: 'endgame',
-    goal: 'מחפשים מסע אחד שסוגר למלך את כל הבריחות.',
-    fen: '6k1/5ppp/8/8/2B4Q/8/5PPP/6K1 w - - 0 1',
-    firstMove: { from: 'h4', to: 'd8' },
-    completion: 'after-first',
-  },
-  {
-    id: 'scholars-mate-finish',
-    title: 'שיעור מט: נקודת חולשה',
-    level: 'starter',
-    skill: 'tactics',
-    goal: 'המלכה והרץ מסתכלים יחד על נקודת חולשה ליד המלך.',
-    fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4',
-    firstMove: { from: 'h5', to: 'f7' },
-    completion: 'after-first',
-  },
-  {
-    id: 'back-rank-rook-mate',
-    title: 'שיעור מט: שורה אחרונה',
-    level: 'starter',
-    skill: 'tactics',
-    goal: 'המלך תקוע מאחורי הרגלים שלו. מצא שח שאין ממנו בריחה.',
-    fen: '6k1/5ppp/8/8/8/8/6PP/4R1K1 w - - 0 1',
-    firstMove: { from: 'e1', to: 'e8' },
-    completion: 'after-first',
-  },
-  {
-    id: 'ladder-rook-mate',
-    title: 'שיעור מט: סולם',
-    level: 'starter',
-    skill: 'endgame',
-    goal: 'שני צריחים עובדים יחד ודוחפים את המלך לקצה.',
-    fen: '7k/6pp/8/8/8/8/R7/1R4K1 w - - 0 1',
-    firstMove: { from: 'b1', to: 'b8' },
-    completion: 'after-first',
-  },
-  {
-    id: 'queen-king-corner-mate',
-    title: 'שיעור מט: המלך עוזר',
-    level: 'starter',
-    skill: 'endgame',
-    goal: 'המלך שלך עוזר למלכה לסגור את הפינה.',
-    fen: '7k/6Q1/6K1/8/8/8/8/8 w - - 0 1',
-    firstMove: { from: 'g7', to: 'f8' },
-    completion: 'after-first',
-  },
-  {
-    id: 'mate-two-queen-bishop',
-    title: 'שיעור מט: שני שלבים',
-    level: 'starter',
-    skill: 'tactics',
-    goal: 'קודם נותנים שח שמכריח את המלך לזוז, ואז מוצאים מט.',
-    fen: '6k1/5ppp/8/7Q/2B5/8/5PPP/6K1 w - - 0 1',
-    firstMove: { from: 'h5', to: 'f7' },
-    completion: 'mate-after-reply',
-    forcedReply: 'Kh8',
-  },
-  {
-    id: 'safety-free-queen',
-    title: 'שיעור: כלי לא מוגן',
-    level: 'starter',
-    skill: 'safety',
-    goal: 'מצא כלי של היריב שאפשר לקחת בלי להפסיד כלי בחזרה.',
-    fen: '4k3/8/8/8/4q3/8/4Q3/4K3 w - - 0 1',
-    firstMove: { from: 'e2', to: 'e4' },
-    completion: 'after-first',
-  },
-  {
-    id: 'focus-stop-check',
-    title: 'שיעור: קודם יוצאים משח',
-    level: 'starter',
-    skill: 'focus',
-    goal: 'המלך בשח. לפני כל רעיון אחר חייבים למצוא משבצת בטוחה למלך.',
-    fen: '4k3/8/8/8/8/8/4r3/4K3 w - - 0 1',
-    firstMove: { from: 'e1', to: 'd1' },
-    completion: 'after-first',
-  },
-]
+function moveDescriptorFromUci(uci: string) {
+  if (uci.length < 4) return null
+  return {
+    from: uci.slice(0, 2) as Square,
+    to: uci.slice(2, 4) as Square,
+    promotion: uci[4] as 'q' | 'r' | 'b' | 'n' | undefined,
+  }
+}
 
-const mateLessonOrder = [
-  'mate-one-queen-bishop',
-  'back-rank-rook-mate',
-  'queen-king-corner-mate',
-  'ladder-rook-mate',
-  'scholars-mate-finish',
-  'mate-two-queen-bishop',
-]
+function applyUci(chess: Chess, uci: string) {
+  const move = moveDescriptorFromUci(uci)
+  if (!move) throw new Error('Invalid UCI move')
+  return chess.move({ ...move, promotion: move.promotion ?? 'q' })
+}
+
+function mateInFromThemes(themes: string[]) {
+  const mateTheme = themes.find((theme) => /^mateIn\d+$/.test(theme))
+  return mateTheme ? Number(mateTheme.replace('mateIn', '')) : 1
+}
+
+function titleFromPuzzleThemes(seed: LichessPuzzleSeed, mateIn: number) {
+  if (seed.themes.includes('backRankMate')) return 'שיעור מט: שורה אחרונה'
+  if (seed.themes.includes('smotheredMate')) return 'שיעור מט: מלך חסום'
+  if (seed.themes.includes('bodenMate')) return 'שיעור מט: שני רצים'
+  if (seed.themes.includes('cornerMate')) return 'שיעור מט: פינה סגורה'
+  if (seed.themes.includes('rookEndgame')) return 'שיעור מט: צריח וסיום'
+  return mateIn === 1 ? 'שיעור מט במהלך אחד' : `שיעור מט ב-${mateIn} מהלכים`
+}
+
+function goalFromPuzzleThemes(seed: LichessPuzzleSeed, mateIn: number) {
+  if (seed.themes.includes('backRankMate')) return 'מצא שח על השורה האחרונה, כשהמלך חסום ואין לו לאן לברוח.'
+  if (seed.themes.includes('smotheredMate')) return 'מצא שח שבו הכלים ליד המלך חוסמים לו את כל הבריחות.'
+  if (seed.themes.includes('cornerMate')) return 'המלך קרוב לפינה. מצא מסע שסוגר את הפינה ונותן מט.'
+  if (seed.themes.includes('rookEndgame')) return 'בסיומי צריחים בודקים קודם שורה, עמודה ובריחות של המלך.'
+  return mateIn === 1
+    ? 'מצא מסע אחד שנותן שח, וסוגר למלך היריב את כל הבריחות.'
+    : `מצא סדרת מסעים שמובילה למט ב-${mateIn} מהלכים.`
+}
+
+function skillFromPuzzleThemes(themes: string[]): SkillKey {
+  return themes.includes('endgame') || themes.includes('rookEndgame') ? 'endgame' : 'tactics'
+}
+
+function buildLichessPracticePuzzle(seed: LichessPuzzleSeed): PracticePuzzle | null {
+  const rawMoves = seed.moves.split(/\s+/).filter(Boolean)
+  if (rawMoves.length < 2) return null
+
+  const puzzleGame = new Chess(seed.fen)
+
+  try {
+    applyUci(puzzleGame, rawMoves[0])
+  } catch {
+    return null
+  }
+
+  if (puzzleGame.turn() !== 'w') return null
+
+  const solution = rawMoves.slice(1)
+  const verificationGame = new Chess(puzzleGame.fen())
+
+  try {
+    for (const uci of solution) applyUci(verificationGame, uci)
+  } catch {
+    return null
+  }
+
+  if (!verificationGame.isCheckmate()) return null
+
+  const mateIn = mateInFromThemes(seed.themes)
+
+  return {
+    id: `lichess-${seed.puzzleId}`,
+    title: titleFromPuzzleThemes(seed, mateIn),
+    level: seed.rating < 900 ? 'starter' : 'builder',
+    skill: skillFromPuzzleThemes(seed.themes),
+    goal: goalFromPuzzleThemes(seed, mateIn),
+    fen: puzzleGame.fen(),
+    solution,
+    mateIn,
+    rating: seed.rating,
+    themes: seed.themes,
+    source: 'lichess',
+  }
+}
+
+const practicePuzzles: PracticePuzzle[] = lichessMateLessons
+  .map(buildLichessPracticePuzzle)
+  .filter((puzzle): puzzle is PracticePuzzle => Boolean(puzzle))
 
 const centerSquares = new Set(['c3', 'd3', 'e3', 'f3', 'c4', 'd4', 'e4', 'f4', 'c5', 'd5', 'e5', 'f5', 'c6', 'd6', 'e6', 'f6'])
 const startingBackRank = new Set(['b1', 'c1', 'f1', 'g1'])
@@ -750,13 +742,8 @@ function getRecommendedPuzzle(
   _skillScores: Record<SkillKey, number>,
   solvedPuzzleIds: Set<string>,
 ) {
-  const matePuzzlesById = new Map(practicePuzzles.filter((puzzle) => isMatePuzzle(puzzle)).map((puzzle) => [puzzle.id, puzzle]))
-  const lessonPath = mateLessonOrder.map((puzzleId) => matePuzzlesById.get(puzzleId)).filter((puzzle): puzzle is PracticePuzzle => Boolean(puzzle))
-  return (
-    lessonPath.find((puzzle) => !solvedPuzzleIds.has(puzzle.id)) ??
-    lessonPath[0] ??
-    practicePuzzles[0]
-  )
+  const unsolved = practicePuzzles.find((puzzle) => !solvedPuzzleIds.has(puzzle.id))
+  return unsolved ?? practicePuzzles[0]
 }
 
 function getSolvedPuzzleIds(practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>, sessionSolvedIds: string[]) {
@@ -767,13 +754,12 @@ function getSolvedPuzzleIds(practiceProgress: Record<string, { solved: boolean; 
   return solvedIds
 }
 
-function isMatePuzzle(puzzle: PracticePuzzle) {
-  return puzzle.id.includes('mate') || puzzle.title.includes('מט') || puzzle.completion === 'mate-after-reply'
-}
-
 function getPuzzleMoveCountLabel(puzzle: PracticePuzzle, stage = 0) {
-  if (puzzle.completion === 'mate-after-reply' && stage === 0) return 'מט בשני מהלכים'
-  return 'מט במהלך אחד'
+  const remainingMoves = Math.max(1, puzzle.mateIn - stage)
+  if (remainingMoves === 1) return 'מט במהלך אחד'
+  if (remainingMoves === 2) return 'מט בשני מהלכים'
+  if (remainingMoves === 3) return 'מט בשלושה מהלכים'
+  return `מט ב-${remainingMoves} מהלכים`
 }
 
 function getLessonIntro(puzzle: PracticePuzzle, childName: string) {
@@ -782,57 +768,43 @@ function getLessonIntro(puzzle: PracticePuzzle, childName: string) {
 }
 
 function getLessonSuccessText(puzzle: PracticePuzzle, childName: string, stage: number) {
-  const step = getPracticeStep(puzzle, stage)
-  if (step?.success) return `${childName}, נכון. ${step.success}`
-  if (puzzle.completion === 'mate-after-reply' && stage === 0) return `${childName}, נכון. זה היה המסע הראשון. עכשיו נשאר מט במהלך אחד.`
+  if (stage < puzzle.mateIn - 1) {
+    const nextLabel = getPuzzleMoveCountLabel(puzzle, stage + 1)
+    return `${childName}, נכון. הכרחת את היריב להגיב, ועכשיו נשאר ${nextLabel}.`
+  }
   return `${childName}, מצוין. זה מט, כי למלך היריב אין אף משבצת בטוחה לברוח אליה.`
 }
 
-function getPracticeStep(puzzle: PracticePuzzle, stage: number) {
-  return puzzle.steps?.[stage] ?? null
-}
-
 function getExpectedPracticeMove(puzzle: PracticePuzzle, stage: number) {
-  return getPracticeStep(puzzle, stage)?.move ?? puzzle.firstMove
+  return moveDescriptorFromUci(puzzle.solution[stage * 2] ?? '')
 }
 
 function getPracticeHint(puzzle: PracticePuzzle, stage: number, childName: string) {
-  if (puzzle.id === 'mate-one-queen-bishop') {
-    return `${childName}, רמז: המלכה יכולה לתת שח, והרץ עוזר לה לשמור על האלכסון.`
+  const expectedMove = puzzle.solution[stage * 2]
+  if (!expectedMove) return `${childName}, רמז: חפש מסע שנותן שח ומוריד למלך את כל הבריחות.`
+
+  const puzzleGame = new Chess(puzzle.fen)
+  for (let index = 0; index < stage * 2; index += 1) applyUci(puzzleGame, puzzle.solution[index])
+  const candidateMove = moveFromUci(puzzleGame, expectedMove)
+  const pieceName = candidateMove ? pieceNames[candidateMove.piece] : 'כלי'
+
+  if (puzzle.themes.includes('backRankMate')) {
+    return `${childName}, רמז: חפש ${pieceName} שיכול לתת שח על השורה האחרונה. המלך חסום מאחור.`
   }
 
-  if (puzzle.id === 'scholars-mate-finish') {
-    return `${childName}, רמז: חפש את הרגלי החלש ליד המלך. המלכה והרץ מסתכלים עליו יחד.`
+  if (puzzle.themes.includes('smotheredMate')) {
+    return `${childName}, רמז: הכלים ליד המלך מפריעים לו לברוח. חפש שח עם ${pieceName}.`
   }
 
-  if (puzzle.id === 'back-rank-rook-mate') {
-    return `${childName}, רמז: המלך תקוע מאחורי הרגלים שלו. איזה צריח יכול להגיע לשורה האחרונה?`
+  if (candidateMove?.captured) {
+    return `${childName}, רמז: יש מסע עם ${pieceName} שנותן שח וגם לוקח כלי חשוב.`
   }
 
-  if (puzzle.id === 'ladder-rook-mate') {
-    return `${childName}, רמז: צריח אחד חוסם, והצריח השני נותן שח מהשורה האחרונה.`
+  if (candidateMove?.san.includes('+') || candidateMove?.san.includes('#')) {
+    return `${childName}, רמז: חפש מסע שח עם ${pieceName}. אחרי השח בדוק אם למלך נשארת משבצת.`
   }
 
-  if (puzzle.id === 'queen-king-corner-mate') {
-    return `${childName}, רמז: המלך שלך שומר על המלכה. חפש שח ליד הפינה.`
-  }
-
-  if (puzzle.id === 'mate-two-queen-bishop') {
-    return stage === 0
-      ? `${childName}, רמז: קודם צריך שח עם המלכה שמכריח את המלך ללכת לפינה.`
-      : `${childName}, רמז: עכשיו המלך בפינה. חפש שח עם המלכה על השורה האחרונה.`
-  }
-
-  if (puzzle.id === 'opening-first-pawn-center') {
-    if (stage === 0) return `${childName}, רמז קטן: חפש רגלי באמצע הלוח שפותח דרך לרץ ולמלכה.`
-    if (stage === 1) return `${childName}, רמז קטן: חפש סוס שיכול לקפוץ קרוב למרכז.`
-    return `${childName}, רמז קטן: אחרי שהרגלי זז, אחד הרצים קיבל דרך לצאת.`
-  }
-
-  if (puzzle.skill === 'safety') return `${childName}, רמז קטן: חפש כלי של היריב שאין לו שומר.`
-  if (puzzle.skill === 'tactics') return `${childName}, רמז קטן: קודם בודקים שח, אחר כך לקיחה, אחר כך איום.`
-  if (puzzle.skill === 'endgame') return `${childName}, רמז קטן: בדוק לאן המלך יכול לברוח וסגור לו משבצת.`
-  return `${childName}, רמז קטן: עצור ושאל מה היריב מאיים.`
+  return `${childName}, רמז: חפש מסע עם ${pieceName} שמכריח את היריב להגיב, ואז תוכל לסגור את המט.`
 }
 
 function getWrongLessonMoveMessage(puzzle: PracticePuzzle, gameAfterMove: Chess, playerMove: Move, childName: string) {
@@ -1341,92 +1313,47 @@ function App() {
       return false
     }
 
-    const step = getPracticeStep(activePuzzle.puzzle, activePuzzle.stage)
+    const expectedMove = getExpectedPracticeMove(activePuzzle.puzzle, activePuzzle.stage)
+    const isExpectedMove =
+      Boolean(expectedMove) &&
+      playerMove.from === expectedMove?.from &&
+      playerMove.to === expectedMove?.to &&
+      (!expectedMove?.promotion || playerMove.promotion === expectedMove.promotion)
 
-    if (step) {
-      const isExpectedStepMove = playerMove.from === step.move.from && playerMove.to === step.move.to
-
-      if (!isExpectedStepMove) {
-        setHighlightedSquares({
-          [playerMove.from]: { background: '#fecaca' },
-          [playerMove.to]: { background: '#fca5a5' },
-        })
-        updateCoach({
-          mood: 'careful',
-          text: getWrongLessonMoveMessage(activePuzzle.puzzle, nextGame, playerMove, childName),
-        })
-        return false
-      }
-
-      if (step.reply) nextGame.move(step.reply)
-
-      const nextStage = activePuzzle.stage + 1
-      const hasNextStep = Boolean(getPracticeStep(activePuzzle.puzzle, nextStage))
-      if (!hasNextStep) {
-        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
-        return true
-      }
-
-      setGame(nextGame)
-      setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: nextStage })
-      setLastMove(`${playerMove.from} אל ${playerMove.to}; ${step.lastMoveLabel ?? 'השחור הגיב'}`)
+    if (!isExpectedMove) {
       setHighlightedSquares({
-        [playerMove.from]: { background: '#bfdbfe' },
-        [playerMove.to]: { background: '#86efac' },
+        [playerMove.from]: { background: '#fecaca' },
+        [playerMove.to]: { background: '#fca5a5' },
       })
-      updateCoach({
-        mood: 'good',
-        text: `${childName}, נכון. ${step.success} ${step.prompt}`,
-      })
-      return true
-    }
-
-    if (activePuzzle.stage === 0) {
-      const expectedMove = getExpectedPracticeMove(activePuzzle.puzzle, activePuzzle.stage)
-      const isExpectedFirstMove = playerMove.from === expectedMove.from && playerMove.to === expectedMove.to
-
-      if (!isExpectedFirstMove) {
-        setHighlightedSquares({
-          [playerMove.from]: { background: '#fecaca' },
-          [playerMove.to]: { background: '#fca5a5' },
-        })
-        updateCoach({
-          mood: 'careful',
-          text: getWrongLessonMoveMessage(activePuzzle.puzzle, nextGame, playerMove, childName),
-        })
-        return false
-      }
-
-      if (activePuzzle.puzzle.completion === 'after-first') {
-        completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
-        return true
-      }
-
-      if (!activePuzzle.puzzle.forcedReply) return false
-      nextGame.move(activePuzzle.puzzle.forcedReply)
-      setGame(nextGame)
-      setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: 1 })
-      setLastMove('המסע הראשון נכון')
-      setHighlightedSquares({
-        [playerMove.from]: { background: '#bfdbfe' },
-        [playerMove.to]: { background: '#86efac' },
-      })
-      updateCoach({
-        mood: 'good',
-        text: `${childName}, נכון. זה היה המסע הראשון. עכשיו יש מט במהלך אחד. חפש שח שלא משאיר למלך אף בריחה.`,
-      })
-      return true
-    }
-
-    if (!playerMove.san.includes('#')) {
       updateCoach({
         mood: 'careful',
-        text: `${childName}, זה מסע חוקי, אבל זה לא מט. במט צריך לתת שח ולסגור למלך את כל הבריחות.`,
+        text: getWrongLessonMoveMessage(activePuzzle.puzzle, nextGame, playerMove, childName),
       })
       return false
     }
 
-    completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
+    const replyUci = activePuzzle.puzzle.solution[activePuzzle.stage * 2 + 1]
+    if (replyUci) applyUci(nextGame, replyUci)
+
+    const nextStage = activePuzzle.stage + 1
+    const hasNextChildMove = Boolean(activePuzzle.puzzle.solution[nextStage * 2])
+
+    if (!hasNextChildMove) {
+      completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
+      return true
+    }
+
+    setGame(nextGame)
+    setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: nextStage })
+    setLastMove('המסע הראשון נכון')
+    setHighlightedSquares({
+      [playerMove.from]: { background: '#bfdbfe' },
+      [playerMove.to]: { background: '#86efac' },
+    })
+    updateCoach({
+      mood: 'good',
+      text: getLessonSuccessText(activePuzzle.puzzle, childName, activePuzzle.stage),
+    })
     return true
   }
 
