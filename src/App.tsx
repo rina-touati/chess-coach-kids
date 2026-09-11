@@ -12,6 +12,8 @@ type CoachMessage = {
   mood: CoachMood
 }
 
+type PlayMode = 'guided' | 'regular'
+
 type StockfishAnalysis = {
   bestMove: string | null
   ponder: string | null
@@ -686,6 +688,64 @@ function getHint(chess: Chess) {
   }
 }
 
+function getPreMoveGuidance(childName: string, chess: Chess, stockfishBestMove?: string | null): CoachMessage {
+  if (chess.isGameOver()) return getGameOverMessage(chess, childName) ?? { mood: 'idea', text: 'המשחק נגמר. אפשר להתחיל משחק חדש.' }
+
+  if (chess.isCheck()) {
+    return {
+      mood: 'careful',
+      text: `${childName}, לפני המסע הבא קודם מצילים את המלך. חפש אם אפשר לזוז, לחסום את השח, או לאכול את הכלי שנותן שח.`,
+    }
+  }
+
+  const stockfishMove = moveFromUci(chess, stockfishBestMove ?? null)
+  const localBestMove = analyzeLegalMoves(chess, 2)[0]?.move
+  const bestMove = stockfishMove ?? localBestMove
+
+  if (!bestMove) {
+    return {
+      mood: 'idea',
+      text: `${childName}, לפני המסע הבא עצור רגע: מה היריב מאיים, ואיזה כלי שלך לא מוגן?`,
+    }
+  }
+
+  const piece = pieceNames[bestMove.piece] ?? 'כלי'
+  const reason = explainMoveReason(bestMove)
+
+  if (bestMove.san.includes('#')) {
+    return {
+      mood: 'idea',
+      text: `${childName}, יש כאן רעיון של מט. לפני שאתה זז, חפש שח עם ${piece} וספור אם למלך נשארת בריחה.`,
+    }
+  }
+
+  if (bestMove.san.includes('+')) {
+    return {
+      mood: 'idea',
+      text: `${childName}, לפני המסע הבא חפש שח עם ${piece}. שח טוב מכריח את היריב לענות מיד.`,
+    }
+  }
+
+  if (bestMove.captured) {
+    return {
+      mood: 'idea',
+      text: `${childName}, יש אפשרות לקחת כלי עם ${piece}. לפני שלוקחים, בדוק אם הכלי שלך נשאר מוגן אחרי הלקיחה.`,
+    }
+  }
+
+  if (chess.moveNumber() <= 6) {
+    return {
+      mood: 'idea',
+      text: `${childName}, לפני המסע הבא חפש כלי שעוד לא יצא למשחק. רעיון טוב עכשיו: ${piece}, ${reason}.`,
+    }
+  }
+
+  return {
+    mood: 'idea',
+    text: `${childName}, לפני המסע הבא חפש רעיון עם ${piece}: ${reason}. אחר כך בדוק מה היריב יכול לעשות בחזרה.`,
+  }
+}
+
 function normalizeSkillScores(value: unknown): Record<SkillKey, number> {
   const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   return {
@@ -898,6 +958,7 @@ function App() {
   const [, setLastMove] = useState<string>('עוד לא התחיל')
   const [cloudGameId, setCloudGameId] = useState<string | undefined>()
   const [isListening, setIsListening] = useState(false)
+  const [playMode, setPlayMode] = useState<PlayMode>('guided')
   const [activePuzzle, setActivePuzzle] = useState<{ puzzle: PracticePuzzle; stage: number } | null>(null)
   const [sessionSolvedPuzzleIds, setSessionSolvedPuzzleIds] = useState<string[]>([])
   const [lastCompletedPuzzle, setLastCompletedPuzzle] = useState<PracticePuzzle | null>(null)
@@ -908,8 +969,20 @@ function App() {
   const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
   const boardFocusSkill = getBoardFocusSkill(game, movesPlayed)
   const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlans[boardFocusSkill]
-  const activeTrainingTitle = activePuzzle ? getPuzzleMoveCountLabel(activePuzzle.puzzle, activePuzzle.stage) : lastCompletedPuzzle ? 'שיעור הושלם' : activePracticePlan.title
-  const activeTrainingQuestion = activePuzzle?.puzzle.goal ?? (lastCompletedPuzzle ? 'לחץ שיעור הבא כדי להמשיך לתרגיל חדש.' : activePracticePlan.question)
+  const activeTrainingTitle = activePuzzle
+    ? getPuzzleMoveCountLabel(activePuzzle.puzzle, activePuzzle.stage)
+    : lastCompletedPuzzle
+      ? 'שיעור הושלם'
+      : playMode === 'guided'
+        ? 'משחק עם מאמן'
+        : 'משחק רגיל'
+  const activeTrainingQuestion =
+    activePuzzle?.puzzle.goal ??
+    (lastCompletedPuzzle
+      ? 'לחץ שיעור הבא כדי להמשיך לתרגיל חדש.'
+      : playMode === 'guided'
+        ? 'לפני כל מסע המאמן נותן כיוון קצר, ואז הילד מחליט לבד.'
+        : activePracticePlan.question)
   const lessonButtonLabel = lastCompletedPuzzle && !activePuzzle ? 'שיעור הבא' : 'שיעור'
   useEffect(() => {
     let isMounted = true
@@ -1175,10 +1248,15 @@ function App() {
           }
         : {}),
     })
-    updateCoach({
-      mood: result.mood === 'good' || result.mood === 'careful' || result.mood === 'idea' ? result.mood : 'idea',
-      text: result.text,
-    })
+    const shouldGuideNextMove = playMode === 'guided' && !serverGame.isGameOver() && serverGame.turn() === 'w'
+    if (!shouldGuideNextMove) {
+      updateCoach({
+        mood: result.mood === 'good' || result.mood === 'careful' || result.mood === 'idea' ? result.mood : 'idea',
+        text: result.text,
+      })
+    }
+
+    return { result, serverGame }
   }
 
   async function sendVoiceQuestion(transcript: string) {
@@ -1444,7 +1522,15 @@ function App() {
     nextMoveCount: number,
   ) {
     try {
-      await applyServerMoveCoach(gameBeforeMove, playerMove, nextMoveCount)
+      const serverResult = await applyServerMoveCoach(gameBeforeMove, playerMove, nextMoveCount)
+      if (playMode === 'guided' && !serverResult.serverGame.isGameOver() && serverResult.serverGame.turn() === 'w') {
+        try {
+          const nextHint = await fetchStockfishAnalysis(serverResult.serverGame, 20, 320)
+          updateCoach(getPreMoveGuidance(childName, serverResult.serverGame, nextHint.bestMove))
+        } catch {
+          updateCoach(getPreMoveGuidance(childName, serverResult.serverGame))
+        }
+      }
       return
     } catch {
       // Fall back to the local path if the server-side chess coach is unavailable.
@@ -1493,9 +1579,9 @@ function App() {
       nextGame,
       null,
     )
-    const message =
-      terminalMessage ??
-      localFeedback
+    const message = terminalMessage ?? (playMode === 'guided' && nextGame.turn() === 'w'
+      ? getPreMoveGuidance(childName, nextGame, engineAfterBlackMove?.bestMove ?? null)
+      : localFeedback)
 
     setGame(nextGame)
 
@@ -1545,8 +1631,9 @@ function App() {
     }
   }
 
-  function resetGame() {
+  function resetGame(nextMode: PlayMode = playMode) {
     const freshGame = new Chess()
+    setPlayMode(nextMode)
     setActivePuzzle(null)
     setLastCompletedPuzzle(null)
     setGame(freshGame)
@@ -1554,9 +1641,12 @@ function App() {
     setCloudGameId(undefined)
     setLastMove('עוד לא התחיל')
     setHighlightedSquares({})
-    setCoach({
+    updateCoach({
       mood: 'idea',
-      text: `${childName}, משחק חדש התחיל. לפני המסע חפש שלושה דברים: שח, לקיחה, ואיום של היריב.`,
+      text:
+        nextMode === 'guided'
+          ? `${childName}, משחק עם מאמן התחיל. לפני כל מסע נעצור לרגע ונבדוק: שח, לקיחה, איום, וכלי לא מוגן.`
+          : `${childName}, משחק רגיל התחיל. שחק לבד, והמאמן ינתח אחרי המסעים.`,
     })
   }
 
@@ -1637,9 +1727,23 @@ function App() {
         </div>
 
         <div className="controls" aria-label="פעולות משחק">
-          <button type="button" onClick={resetGame} title="משחק חופשי">
+          <button
+            type="button"
+            onClick={() => resetGame('guided')}
+            title="משחק עם עזרה לפני מסע"
+            className={playMode === 'guided' && !activePuzzle ? 'active-mode' : undefined}
+          >
+            <Target aria-hidden="true" />
+            <span>מאמן</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => resetGame('regular')}
+            title="משחק רגיל"
+            className={playMode === 'regular' && !activePuzzle ? 'active-mode' : undefined}
+          >
             <Play aria-hidden="true" />
-            <span>משחק</span>
+            <span>רגיל</span>
           </button>
           <button type="button" onClick={() => startPractice()} title="שיעור מט">
             <Target aria-hidden="true" />
