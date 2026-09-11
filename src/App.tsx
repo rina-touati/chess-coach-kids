@@ -200,6 +200,15 @@ const practicePuzzles: PracticePuzzle[] = [
   },
 ]
 
+const mateLessonOrder = [
+  'mate-one-queen-bishop',
+  'back-rank-rook-mate',
+  'queen-king-corner-mate',
+  'ladder-rook-mate',
+  'scholars-mate-finish',
+  'mate-two-queen-bishop',
+]
+
 const centerSquares = new Set(['c3', 'd3', 'e3', 'f3', 'c4', 'd4', 'e4', 'f4', 'c5', 'd5', 'e5', 'f5', 'c6', 'd6', 'e6', 'f6'])
 const startingBackRank = new Set(['b1', 'c1', 'f1', 'g1'])
 const pieceValues = {
@@ -725,10 +734,6 @@ function normalizeProfilePayload(value: unknown): ChildProfile | null {
   }
 }
 
-function getWeakestSkillKey(skillScores: Record<SkillKey, number>) {
-  return (Object.entries(skillScores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'focus') as SkillKey
-}
-
 function getAdaptiveEngineSkill(skillScores: Record<SkillKey, number>) {
   const average = Object.values(skillScores).reduce((sum, score) => sum + score, 0) / Object.values(skillScores).length
   return Math.max(2, Math.min(14, Math.round(2 + average / 10)))
@@ -742,17 +747,24 @@ function getBoardFocusSkill(chess: Chess, moveCount: number): SkillKey {
 }
 
 function getRecommendedPuzzle(
-  skillScores: Record<SkillKey, number>,
-  practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>,
+  _skillScores: Record<SkillKey, number>,
+  solvedPuzzleIds: Set<string>,
 ) {
-  const matePuzzles = practicePuzzles.filter((puzzle) => isMatePuzzle(puzzle))
-  const weakest = getWeakestSkillKey(skillScores)
+  const matePuzzlesById = new Map(practicePuzzles.filter((puzzle) => isMatePuzzle(puzzle)).map((puzzle) => [puzzle.id, puzzle]))
+  const lessonPath = mateLessonOrder.map((puzzleId) => matePuzzlesById.get(puzzleId)).filter((puzzle): puzzle is PracticePuzzle => Boolean(puzzle))
   return (
-    matePuzzles.find((puzzle) => puzzle.skill === weakest && !practiceProgress[puzzle.id]?.solved) ??
-    matePuzzles.find((puzzle) => !practiceProgress[puzzle.id]?.solved) ??
-    matePuzzles[0] ??
+    lessonPath.find((puzzle) => !solvedPuzzleIds.has(puzzle.id)) ??
+    lessonPath[0] ??
     practicePuzzles[0]
   )
+}
+
+function getSolvedPuzzleIds(practiceProgress: Record<string, { solved: boolean; solvedAt?: string }>, sessionSolvedIds: string[]) {
+  const solvedIds = new Set(sessionSolvedIds)
+  for (const [puzzleId, progress] of Object.entries(practiceProgress)) {
+    if (progress?.solved) solvedIds.add(puzzleId)
+  }
+  return solvedIds
 }
 
 function isMatePuzzle(puzzle: PracticePuzzle) {
@@ -915,14 +927,18 @@ function App() {
   const [cloudGameId, setCloudGameId] = useState<string | undefined>()
   const [isListening, setIsListening] = useState(false)
   const [activePuzzle, setActivePuzzle] = useState<{ puzzle: PracticePuzzle; stage: number } | null>(null)
+  const [sessionSolvedPuzzleIds, setSessionSolvedPuzzleIds] = useState<string[]>([])
+  const [lastCompletedPuzzle, setLastCompletedPuzzle] = useState<PracticePuzzle | null>(null)
   const childName = profile?.displayName?.trim() || fallbackKidName
   const skillScores = normalizeSkillScores(profile?.skillScores)
-  const recommendedPuzzle = getRecommendedPuzzle(skillScores, profile?.summary?.practice_progress ?? {})
+  const solvedPuzzleIds = getSolvedPuzzleIds(profile?.summary?.practice_progress ?? {}, sessionSolvedPuzzleIds)
+  const recommendedPuzzle = getRecommendedPuzzle(skillScores, solvedPuzzleIds)
   const adaptiveEngineSkill = getAdaptiveEngineSkill(skillScores)
   const boardFocusSkill = getBoardFocusSkill(game, movesPlayed)
   const activePracticePlan = activePuzzle ? practicePlans[activePuzzle.puzzle.skill] : practicePlans[boardFocusSkill]
-  const activeTrainingTitle = activePuzzle ? getPuzzleMoveCountLabel(activePuzzle.puzzle, activePuzzle.stage) : activePracticePlan.title
-  const activeTrainingQuestion = activePuzzle?.puzzle.goal ?? activePracticePlan.question
+  const activeTrainingTitle = activePuzzle ? getPuzzleMoveCountLabel(activePuzzle.puzzle, activePuzzle.stage) : lastCompletedPuzzle ? 'שיעור הושלם' : activePracticePlan.title
+  const activeTrainingQuestion = activePuzzle?.puzzle.goal ?? (lastCompletedPuzzle ? 'לחץ שיעור הבא כדי להמשיך לתרגיל חדש.' : activePracticePlan.question)
+  const lessonButtonLabel = lastCompletedPuzzle && !activePuzzle ? 'שיעור הבא' : 'שיעור'
   useEffect(() => {
     let isMounted = true
 
@@ -1276,6 +1292,7 @@ function App() {
     const puzzle = selectedPuzzle
     const puzzleGame = new Chess(puzzle.fen)
     setActivePuzzle({ puzzle, stage: 0 })
+    setLastCompletedPuzzle(null)
     setGame(puzzleGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
@@ -1290,6 +1307,8 @@ function App() {
   function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move, stage: number) {
     setGame(nextGame)
     setActivePuzzle(null)
+    setLastCompletedPuzzle(puzzle)
+    setSessionSolvedPuzzleIds((current) => (current.includes(puzzle.id) ? current : [...current, puzzle.id]))
     setLastMove('שיעור הושלם')
     setHighlightedSquares({
       [playerMove.from]: { background: '#bfdbfe' },
@@ -1407,18 +1426,7 @@ function App() {
       return false
     }
 
-    setGame(nextGame)
-    setActivePuzzle(null)
-    setLastMove('מט')
-    setHighlightedSquares({
-      [playerMove.from]: { background: '#bfdbfe' },
-      [playerMove.to]: { background: '#22c55e' },
-    })
-    updateCoach({
-      mood: 'good',
-      text: `${childName}, מצוין. זה מט, כי המלך היריב בשח ואין לו דרך לברוח.`,
-    })
-    void recordPracticeProgress(activePuzzle.puzzle)
+    completePracticePuzzle(nextGame, activePuzzle.puzzle, playerMove, activePuzzle.stage)
     return true
   }
 
@@ -1613,6 +1621,7 @@ function App() {
   function resetGame() {
     const freshGame = new Chess()
     setActivePuzzle(null)
+    setLastCompletedPuzzle(null)
     setGame(freshGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
@@ -1707,7 +1716,7 @@ function App() {
           </button>
           <button type="button" onClick={() => startPractice()} title="שיעור מט">
             <Target aria-hidden="true" />
-            <span>שיעור</span>
+            <span>{lessonButtonLabel}</span>
           </button>
           <button type="button" onClick={() => speak(coach.text)} title="השמע שוב">
             <Volume2 aria-hidden="true" />
