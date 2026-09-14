@@ -20,7 +20,19 @@ type StockfishAnalysis = {
   scoreCp: number | null
   mateIn: number | null
   depth: number | null
+  lines?: {
+    rank: number
+    move: string
+    scoreCp: number | null
+    mateIn: number | null
+  }[]
   source: 'stockfish'
+}
+
+type GuidanceResponse = {
+  text?: string
+  mood?: CoachMood
+  source?: 'openai' | 'fallback'
 }
 
 type ServerMoveResponse = {
@@ -691,64 +703,6 @@ function getHint(chess: Chess) {
   }
 }
 
-function getPreMoveGuidance(childName: string, chess: Chess, stockfishBestMove?: string | null): CoachMessage {
-  if (chess.isGameOver()) return getGameOverMessage(chess, childName) ?? { mood: 'idea', text: 'המשחק נגמר. אפשר להתחיל משחק חדש.' }
-
-  if (chess.isCheck()) {
-    return {
-      mood: 'careful',
-      text: `${childName}, לפני המסע הבא קודם מצילים את המלך. חפש אם אפשר לזוז, לחסום את השח, או לאכול את הכלי שנותן שח.`,
-    }
-  }
-
-  const stockfishMove = moveFromUci(chess, stockfishBestMove ?? null)
-  const localBestMove = analyzeLegalMoves(chess, 2)[0]?.move
-  const bestMove = stockfishMove ?? localBestMove
-
-  if (!bestMove) {
-    return {
-      mood: 'idea',
-      text: `${childName}, לפני המסע הבא עצור רגע: מה היריב מאיים, ואיזה כלי שלך לא מוגן?`,
-    }
-  }
-
-  const piece = pieceNames[bestMove.piece] ?? 'כלי'
-  const reason = explainMoveReason(bestMove)
-
-  if (bestMove.san.includes('#')) {
-    return {
-      mood: 'idea',
-      text: `${childName}, יש כאן רעיון של מט. לפני שאתה זז, חפש שח עם ${piece} וספור אם למלך נשארת בריחה.`,
-    }
-  }
-
-  if (bestMove.san.includes('+')) {
-    return {
-      mood: 'idea',
-      text: `${childName}, לפני המסע הבא חפש שח עם ${piece}. שח טוב מכריח את היריב לענות מיד.`,
-    }
-  }
-
-  if (bestMove.captured) {
-    return {
-      mood: 'idea',
-      text: `${childName}, יש אפשרות לקחת כלי עם ${piece}. לפני שלוקחים, בדוק אם הכלי שלך נשאר מוגן אחרי הלקיחה.`,
-    }
-  }
-
-  if (chess.moveNumber() <= 6) {
-    return {
-      mood: 'idea',
-      text: `${childName}, לפני המסע הבא חפש כלי שעוד לא יצא למשחק. רעיון טוב עכשיו: ${piece}, ${reason}.`,
-    }
-  }
-
-  return {
-    mood: 'idea',
-    text: `${childName}, לפני המסע הבא חפש רעיון עם ${piece}: ${reason}. אחר כך בדוק מה היריב יכול לעשות בחזרה.`,
-  }
-}
-
 function normalizeSkillScores(value: unknown): Record<SkillKey, number> {
   const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   return {
@@ -799,6 +753,13 @@ function getBoardFocusSkill(chess: Chess, moveCount: number): SkillKey {
   if (moveCount <= 6) return 'opening'
   if (moveCount >= 22) return 'endgame'
   return 'focus'
+}
+
+function getGenericPreMoveGuidance(): CoachMessage {
+  return {
+    mood: 'idea',
+    text: 'עצור רגע — מה היריב מאיים, ואיזה כלי שלך לא מוגן?',
+  }
 }
 
 function getRecommendedPuzzle(
@@ -1127,6 +1088,28 @@ function App() {
     }
   }
 
+  async function requestPreMoveGuidance(chess: Chess): Promise<CoachMessage> {
+    const weakestSkill = typeof profile?.summary?.weakest_skill === 'string' ? profile.summary.weakest_skill : getBoardFocusSkill(chess, movesPlayed)
+    const response = await fetch(apiUrl('/api/guidance'), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fen: chess.fen(),
+        childName,
+        skillLevel: adaptiveEngineSkill,
+        weakestSkill,
+      }),
+    })
+
+    if (!response.ok) throw new Error('Guidance failed')
+    const answer = (await response.json()) as GuidanceResponse
+    const mood = answer.mood === 'good' || answer.mood === 'careful' || answer.mood === 'idea' ? answer.mood : 'idea'
+    const text = typeof answer.text === 'string' && answer.text.trim() ? answer.text.trim() : getGenericPreMoveGuidance().text
+
+    return { mood, text }
+  }
+
   async function applyServerMoveCoach(gameBeforeMove: Chess, playerMove: Move, nextMoveCount: number) {
     const response = await fetch(apiUrl('/api/move'), {
       method: 'POST',
@@ -1447,10 +1430,9 @@ function App() {
       const serverResult = await applyServerMoveCoach(gameBeforeMove, playerMove, nextMoveCount)
       if (playMode === 'guided' && !serverResult.serverGame.isGameOver() && serverResult.serverGame.turn() === 'w') {
         try {
-          const nextHint = await fetchStockfishAnalysis(serverResult.serverGame, 20, 320)
-          updateCoach(getPreMoveGuidance(childName, serverResult.serverGame, nextHint.bestMove))
+          updateCoach(await requestPreMoveGuidance(serverResult.serverGame))
         } catch {
-          updateCoach(getPreMoveGuidance(childName, serverResult.serverGame))
+          updateCoach(getGenericPreMoveGuidance())
         }
       }
       return
@@ -1460,7 +1442,6 @@ function App() {
 
     let blackMove: Move | null = null
     let engineBeforeMove: StockfishAnalysis | null = null
-    let engineAfterBlackMove: StockfishAnalysis | null = null
     const nextGame = new Chess(afterPlayerMove.fen())
 
     try {
@@ -1479,11 +1460,6 @@ function App() {
     if (blackMove && !nextGame.isGameOver()) {
       nextGame.move({ from: blackMove.from, to: blackMove.to, promotion: blackMove.promotion ?? 'q' })
       setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: ${blackMove.from} אל ${blackMove.to}`)
-      try {
-        engineAfterBlackMove = await fetchStockfishAnalysis(nextGame, 20, 220)
-      } catch {
-        engineAfterBlackMove = null
-      }
     }
 
     const terminalMessage = getGameOverMessage(nextGame, childName)
@@ -1499,9 +1475,14 @@ function App() {
       nextGame,
       null,
     )
-    const message = terminalMessage ?? (playMode === 'guided' && nextGame.turn() === 'w'
-      ? getPreMoveGuidance(childName, nextGame, engineAfterBlackMove?.bestMove ?? null)
-      : localFeedback)
+    let message = terminalMessage ?? localFeedback
+    if (!terminalMessage && playMode === 'guided' && nextGame.turn() === 'w') {
+      try {
+        message = await requestPreMoveGuidance(nextGame)
+      } catch {
+        message = getGenericPreMoveGuidance()
+      }
+    }
 
     setGame(nextGame)
 

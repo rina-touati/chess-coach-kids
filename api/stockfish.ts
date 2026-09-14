@@ -12,14 +12,23 @@ type StockfishRequest = {
   fen?: string
   movetime?: number
   skillLevel?: number
+  multiPv?: number
 }
 
-type StockfishResult = {
+export type StockfishLine = {
+  rank: number
+  move: string
+  scoreCp: number | null
+  mateIn: number | null
+}
+
+export type StockfishResult = {
   bestMove: string | null
   ponder: string | null
   scoreCp: number | null
   mateIn: number | null
   depth: number | null
+  lines: StockfishLine[]
   source: 'stockfish'
 }
 
@@ -40,10 +49,25 @@ async function getEngine() {
   return enginePromise
 }
 
-function parseInfo(line: string, current: Omit<StockfishResult, 'bestMove' | 'ponder' | 'source'>) {
+function parseInfo(
+  line: string,
+  current: Omit<StockfishResult, 'bestMove' | 'ponder' | 'lines' | 'source'>,
+  linesByRank: Map<number, StockfishLine>,
+) {
   const depthMatch = line.match(/\bdepth\s+(-?\d+)/)
   const cpMatch = line.match(/\bscore\s+cp\s+(-?\d+)/)
   const mateMatch = line.match(/\bscore\s+mate\s+(-?\d+)/)
+  const multiPvMatch = line.match(/\bmultipv\s+(\d+)/)
+  const pvMatch = line.match(/\bpv\s+([a-h][1-8][a-h][1-8][qrbn]?)/)
+
+  if (multiPvMatch && pvMatch) {
+    linesByRank.set(Number(multiPvMatch[1]), {
+      rank: Number(multiPvMatch[1]),
+      move: pvMatch[1],
+      scoreCp: cpMatch ? Number(cpMatch[1]) : null,
+      mateIn: mateMatch ? Number(mateMatch[1]) : null,
+    })
+  }
 
   return {
     depth: depthMatch ? Number(depthMatch[1]) : current.depth,
@@ -61,12 +85,18 @@ async function runQueued<T>(task: () => Promise<T>) {
   return run
 }
 
-export async function analyzePosition(fen: string, movetime: number, skillLevel: number): Promise<StockfishResult> {
+function sortedLines(linesByRank: Map<number, StockfishLine>) {
+  return [...linesByRank.values()].sort((a, b) => a.rank - b.rank)
+}
+
+export async function analyzePosition(fen: string, movetime: number, skillLevel: number, multiPv = 1): Promise<StockfishResult> {
   return runQueued(async () => {
     const engine = await getEngine()
 
     return new Promise<StockfishResult>((resolve, reject) => {
       let settled = false
+      const requestedMultiPv = clampNumber(multiPv, 1, 1, 3)
+      const linesByRank = new Map<number, StockfishLine>()
       let latest = {
         depth: null as number | null,
         scoreCp: null as number | null,
@@ -82,7 +112,7 @@ export async function analyzePosition(fen: string, movetime: number, skillLevel:
 
       engine.listener = (line: string) => {
         if (line.startsWith('info ')) {
-          latest = parseInfo(line, latest)
+          latest = parseInfo(line, latest, linesByRank)
           return
         }
 
@@ -98,6 +128,7 @@ export async function analyzePosition(fen: string, movetime: number, skillLevel:
           scoreCp: latest.scoreCp,
           mateIn: latest.mateIn,
           depth: latest.depth,
+          lines: sortedLines(linesByRank),
           source: 'stockfish',
         })
       }
@@ -105,6 +136,7 @@ export async function analyzePosition(fen: string, movetime: number, skillLevel:
       engine.sendCommand('ucinewgame')
       engine.sendCommand(`setoption name Skill Level value ${skillLevel}`)
       engine.sendCommand('setoption name UCI_LimitStrength value false')
+      engine.sendCommand(`setoption name MultiPV value ${requestedMultiPv}`)
       engine.sendCommand(`position fen ${fen}`)
       engine.sendCommand(`go movetime ${movetime}`)
     })
@@ -132,6 +164,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         scoreCp: null,
         mateIn: null,
         depth: null,
+        lines: [],
         source: 'stockfish',
       } satisfies StockfishResult)
       return
@@ -139,7 +172,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const movetime = clampNumber(body.movetime, 350, 80, 1200)
     const skillLevel = clampNumber(body.skillLevel, 8, 0, 20)
-    const result = await analyzePosition(chess.fen(), movetime, skillLevel)
+    const multiPv = clampNumber(body.multiPv, 1, 1, 3)
+    const result = await analyzePosition(chess.fen(), movetime, skillLevel, multiPv)
     res.status(200).json(result)
   } catch (error) {
     res.status(500).json({
