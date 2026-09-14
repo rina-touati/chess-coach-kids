@@ -106,7 +106,24 @@ function getEngineSpread(chess: Chess, engineLines: StockfishLine[]) {
   return Math.max(...scores) - Math.min(...scores)
 }
 
+function getKingSquare(chess: Chess, color = chess.turn()) {
+  for (const row of chess.board()) {
+    for (const piece of row) {
+      if (piece?.type === 'k' && piece.color === color) return piece.square as Square
+    }
+  }
+
+  return null
+}
+
 function getTargetPiece(chess: Chess, move: Move | null, theme: PositionTheme) {
+  if (theme === 'king_safety') {
+    return {
+      targetPieceName: 'מלך',
+      targetPieceSquare: getKingSquare(chess),
+    }
+  }
+
   if (!move) return { targetPieceName: null, targetPieceSquare: null }
 
   if (theme === 'capture_free' && move.captured) {
@@ -155,6 +172,10 @@ function deriveTheme(chess: Chess, phase: PositionFacts['phase'], engineLines: S
   const sharedIntent = getSharedIntent(chess, engineLines)
   const engineSpreadCp = getEngineSpread(chess, engineLines)
   const secondScore = scoreFromChildView(chess, engineLines[1])
+
+  if (chess.isCheck()) {
+    return { theme: 'king_safety' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
 
   if (bestLine?.mateIn && bestLine.mateIn > 0 && bestLine.mateIn <= 3) {
     return { theme: 'find_check' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
@@ -209,7 +230,7 @@ export function describePosition(fen: string, engineLines: StockfishLine[]): Pos
   const derived = deriveTheme(chess, phase, engineLines)
   const targetPiece = getTargetPiece(chess, derived.bestMove, derived.theme)
   const threatSquares =
-    derived.theme === 'defend_hanging' || derived.theme === 'escape_threat'
+    derived.theme === 'defend_hanging' || derived.theme === 'escape_threat' || derived.theme === 'king_safety'
       ? targetPiece.targetPieceSquare
         ? [targetPiece.targetPieceSquare]
         : []

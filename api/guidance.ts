@@ -94,6 +94,7 @@ function getGuidanceRejectionReason(rawText: string, text: string, primaryFreeCa
 }
 
 function getFallbackText(facts?: ReturnType<typeof describePosition>, threatenedPieces: string[] = []) {
+  if (facts?.theme === 'king_safety') return 'המלך שלך בשח. קודם מצילים את המלך: לזוז, לחסום, או לאכול את הכלי שנותן שח.'
   if (facts?.theme === 'capture_free') {
     return facts.targetPieceName
       ? `עצור רגע — יש ${facts.targetPieceName} של היריב שאפשר לקחת בבטחה.`
@@ -133,6 +134,10 @@ async function phraseGuidance(args: {
     scoreCp: args.facts.scoreCp,
   }
 
+  if (args.facts.theme === 'king_safety') {
+    return { text: getFallbackText(args.facts, threatenedPieces), mood: 'careful', source: 'fallback', facts: args.facts, ...(shouldExposeCoachDebug() ? { coachDebug: debug } : {}) }
+  }
+
   try {
     const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY'), fetch: nativeFetch })
     const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
@@ -160,7 +165,7 @@ async function phraseGuidance(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. The chess judgment comes only from Stockfish facts: theme, scoreCp, sharedIntent, targetPieceName, phase. Never invent board facts. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. Never say vague coaching like "look at the board", "many options", "good finish", or "think how to win"; every sentence must point to a concrete chess check the child can do now. If phase is not endgame, never mention endgame or the end of the game. If theme is capture_free, guide the child to notice that the targetPieceName can be taken, without naming a square or exact move; never recommend defending in that case. If theme is escape_threat or defend_hanging, guide the child to notice the targetPieceName is in danger, without giving the rescue move. If theme is develop_piece in the opening, development means bringing out a knight or bishop, not a pawn; say כלי קטן, סוס, or רץ. If theme is control_center, talk about fighting for the center without naming a square. If theme is convert_material in an endgame, talk about king safety, checks, pawn promotion, or stopping the opponent pawn. If freeCaptures is empty, never say the child can take or capture an opponent piece. If myHangingPieces and opponentThreats are empty, never imply that a piece is in danger, unprotected, or threatened. Never use English letters, chess notation, or square names like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. You may use the child word חייל for a pawn when natural. Give direction, not the exact best move.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. The chess judgment comes only from Stockfish facts: theme, scoreCp, sharedIntent, targetPieceName, phase. Never invent board facts. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. Never say vague coaching like "look at the board", "many options", "good finish", or "think how to win"; every sentence must point to a concrete chess check the child can do now. If theme is king_safety, say clearly that the king is in check and the child must first save the king; mention the three ideas: move the king, block, or capture the checking piece. If phase is not endgame, never mention endgame or the end of the game. If theme is capture_free, guide the child to notice that the targetPieceName can be taken, without naming a square or exact move; never recommend defending in that case. If theme is escape_threat or defend_hanging, guide the child to notice the targetPieceName is in danger, without giving the rescue move. If theme is develop_piece in the opening, development means bringing out a knight or bishop, not a pawn; say כלי קטן, סוס, or רץ. If theme is control_center, talk about fighting for the center without naming a square. If theme is convert_material in an endgame, talk about king safety, checks, pawn promotion, or stopping the opponent pawn. If freeCaptures is empty, never say the child can take or capture an opponent piece. If myHangingPieces and opponentThreats are empty, never imply that a piece is in danger, unprotected, or threatened. Never use English letters, chess notation, or square names like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. You may use the child word חייל for a pawn when natural. Give direction, not the exact best move.',
         },
         {
           role: 'user',

@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { Chess, type Move, type Square } from 'chess.js'
+import { pieceValues } from '../shared/chessSafety.js'
 import {
   type ApiRequest,
   type ApiResponse,
@@ -271,7 +272,34 @@ function moveFromUci(chess: Chess, uci: string | null) {
   }
 }
 
+function classifyOpponentCandidate(chess: Chess, uci: string | null) {
+  const move = moveFromUci(chess, uci)
+  if (!move) {
+    return {
+      move: null,
+      isNeedlessCapture: false,
+      isDevelopmentMove: false,
+      givesCheck: false,
+    }
+  }
+
+  const capturedValue = move.captured ? pieceValues[move.captured] : 0
+  const moverValue = pieceValues[move.piece]
+  const givesCheck = move.san.includes('+') || move.san.includes('#')
+  const isDevelopmentMove =
+    (move.piece === 'n' || move.piece === 'b') && ['b8', 'g8', 'c8', 'f8'].includes(move.from)
+  const isNeedlessCapture = Boolean(move.captured && capturedValue <= moverValue && !givesCheck)
+
+  return {
+    move,
+    isNeedlessCapture,
+    isDevelopmentMove,
+    givesCheck,
+  }
+}
+
 function chooseHumanLikeOpponentMove(
+  chess: Chess,
   lines: NonNullable<Awaited<ReturnType<typeof analyzePosition>>>['lines'],
   childSkillLevel: number,
 ) {
@@ -279,7 +307,7 @@ function chooseHumanLikeOpponentMove(
   if (legalLines.length === 0) return null
 
   const bestScore = legalLines[0]?.scoreCp
-  const acceptableLossCp = childSkillLevel >= 16 ? 140 : childSkillLevel >= 10 ? 220 : 340
+  const acceptableLossCp = childSkillLevel >= 16 ? 120 : childSkillLevel >= 10 ? 180 : childSkillLevel >= 5 ? 220 : 260
   const saneLines =
     typeof bestScore === 'number'
       ? legalLines.filter((line) => {
@@ -289,24 +317,35 @@ function chooseHumanLikeOpponentMove(
         })
       : legalLines
   const candidates = saneLines.length > 0 ? saneLines.slice(0, 3) : legalLines.slice(0, 3)
+  const quietCandidates = candidates.filter((line) => !classifyOpponentCandidate(chess, line.move).isNeedlessCapture)
+  const humanCandidates = childSkillLevel <= 12 && quietCandidates.length > 0 ? quietCandidates : candidates
+  const sortedCandidates =
+    childSkillLevel <= 8
+      ? [...humanCandidates].sort((a, b) => {
+          const aInfo = classifyOpponentCandidate(chess, a.move)
+          const bInfo = classifyOpponentCandidate(chess, b.move)
+          if (aInfo.isDevelopmentMove !== bInfo.isDevelopmentMove) return aInfo.isDevelopmentMove ? -1 : 1
+          return a.rank - b.rank
+        })
+      : humanCandidates
 
   const weights =
     childSkillLevel >= 16
-      ? [0.76, 0.2, 0.04]
+      ? [0.8, 0.17, 0.03]
       : childSkillLevel >= 10
-        ? [0.56, 0.31, 0.13]
+        ? [0.65, 0.25, 0.1]
         : childSkillLevel >= 5
-          ? [0.42, 0.36, 0.22]
-          : [0.34, 0.38, 0.28]
+          ? [0.58, 0.3, 0.12]
+          : [0.52, 0.32, 0.16]
 
   const roll = Math.random()
   let cumulative = 0
-  for (let index = 0; index < candidates.length; index += 1) {
+  for (let index = 0; index < sortedCandidates.length; index += 1) {
     cumulative += weights[index] ?? 0
-    if (roll <= cumulative) return candidates[index]?.move ?? candidates[0]?.move ?? null
+    if (roll <= cumulative) return sortedCandidates[index]?.move ?? sortedCandidates[0]?.move ?? null
   }
 
-  return candidates[candidates.length - 1]?.move ?? candidates[0]?.move ?? null
+  return sortedCandidates[sortedCandidates.length - 1]?.move ?? sortedCandidates[0]?.move ?? null
 }
 
 function formatMove(move: Move | null | undefined) {
@@ -707,7 +746,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     ])
 
     const bestMove = moveFromUci(new Chess(typeof body.fen === 'string' ? body.fen : undefined), beforeAnalysis?.bestMove ?? null)
-    const opponentMoveUci = blackAnalysis ? chooseHumanLikeOpponentMove(blackAnalysis.lines, skillLevel) : null
+    const opponentMoveUci = blackAnalysis ? chooseHumanLikeOpponentMove(afterPlayer, blackAnalysis.lines, skillLevel) : null
     const stockfishBlackMove = moveFromUci(afterPlayer, opponentMoveUci ?? blackAnalysis?.bestMove ?? null)
     const fallbackBlackMove = !afterPlayer.isGameOver() ? afterPlayer.moves({ verbose: true })[0] ?? null : null
     const blackMove = stockfishBlackMove ?? fallbackBlackMove

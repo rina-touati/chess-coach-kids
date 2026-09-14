@@ -1,4 +1,4 @@
-import { type Chess, type Move, type PieceSymbol, type Square } from 'chess.js'
+import { Chess, type Move, type PieceSymbol, type Square } from 'chess.js'
 
 export const pieceValues: Record<PieceSymbol, number> = {
   p: 100,
@@ -20,21 +20,57 @@ export function getLeastAttackerValue(chess: Chess, square: string, color: 'w' |
   return Math.min(...attackers.map((attackerSquare) => getPieceValueOnSquare(chess, attackerSquare)))
 }
 
+function chessWithTurn(chess: Chess, color: 'w' | 'b') {
+  const fenParts = chess.fen().split(' ')
+  fenParts[1] = color
+  return fenParts.join(' ')
+}
+
+function findLeastValuableLegalCapture(chess: Chess, targetSquare: Square, capturingColor: 'w' | 'b') {
+  const target = chess.get(targetSquare)
+  if (!target || target.color === capturingColor || target.type === 'k') return null
+
+  const candidateGame = new (chess.constructor as typeof Chess)(chessWithTurn(chess, capturingColor))
+  const legalCaptures = candidateGame
+    .moves({ verbose: true })
+    .filter((move) => move.to === targetSquare && Boolean(move.captured))
+    .sort((a, b) => pieceValues[a.piece] - pieceValues[b.piece])
+
+  return legalCaptures[0] ?? null
+}
+
+export function getCaptureGainForSide(chess: Chess, targetSquare: Square, capturingColor: 'w' | 'b', depth = 0): number {
+  if (depth > 24) return 0
+
+  const target = chess.get(targetSquare)
+  if (!target || target.color === capturingColor || target.type === 'k') return 0
+
+  const capture = findLeastValuableLegalCapture(chess, targetSquare, capturingColor)
+  if (!capture) return 0
+
+  const capturedValue = pieceValues[target.type]
+  const afterCapture = new (chess.constructor as typeof Chess)(chessWithTurn(chess, capturingColor))
+  afterCapture.move({
+    from: capture.from,
+    to: capture.to,
+    promotion: capture.promotion ?? 'q',
+  })
+
+  const replyColor = capturingColor === 'w' ? 'b' : 'w'
+  const replyGain = getCaptureGainForSide(afterCapture, targetSquare, replyColor, depth + 1)
+  return capturedValue - Math.max(0, replyGain)
+}
+
+export function isCaptureGoodForSide(chess: Chess, targetSquare: Square, capturingColor: 'w' | 'b') {
+  return getCaptureGainForSide(chess, targetSquare, capturingColor) > 0
+}
+
 export function isPieceHanging(chess: Chess, square: Square, color: 'w' | 'b') {
   const piece = chess.get(square)
   if (!piece || piece.color !== color || piece.type === 'k') return false
 
   const enemyColor = color === 'w' ? 'b' : 'w'
-  const enemyAttackerValue = getLeastAttackerValue(chess, square, enemyColor)
-  if (enemyAttackerValue === null) return false
-
-  const ownDefenderValue = getLeastAttackerValue(chess, square, color)
-  const pieceValue = pieceValues[piece.type]
-
-  if (ownDefenderValue === null) return true
-  if (enemyAttackerValue <= pieceValue && ownDefenderValue > enemyAttackerValue) return true
-  if (enemyAttackerValue > pieceValue && ownDefenderValue > pieceValue) return true
-  return false
+  return isCaptureGoodForSide(chess, square, enemyColor)
 }
 
 export function getMoveSafetyPenalty(chessAfterMove: Chess, move: Move) {
@@ -44,15 +80,6 @@ export function getMoveSafetyPenalty(chessAfterMove: Chess, move: Move) {
   if (!movedPiece) return 0
 
   const enemyColor = movedPiece.color === 'w' ? 'b' : 'w'
-  const ownColor = movedPiece.color
-  const enemyAttackerValue = getLeastAttackerValue(chessAfterMove, move.to, enemyColor)
-  if (enemyAttackerValue === null) return 0
-
-  const ownDefenderValue = getLeastAttackerValue(chessAfterMove, move.to, ownColor)
-  const movedPieceValue = move.promotion ? pieceValues[move.promotion] : pieceValues[movedPiece.type]
-
-  if (ownDefenderValue === null) return movedPieceValue + 120
-  if (enemyAttackerValue <= movedPieceValue && ownDefenderValue > enemyAttackerValue) return Math.round(movedPieceValue * 0.65)
-  if (enemyAttackerValue > movedPieceValue && ownDefenderValue > movedPieceValue) return Math.round(movedPieceValue * 0.45)
-  return 0
+  const captureGain = getCaptureGainForSide(chessAfterMove, move.to as Square, enemyColor)
+  return captureGain > 0 ? captureGain + 80 : 0
 }
