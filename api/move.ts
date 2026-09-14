@@ -12,6 +12,7 @@ import {
   setJsonHeaders,
   type ChessProfileCookie,
 } from './_shared.js'
+import { nativeFetch } from './nativeFetch.js'
 import { analyzePosition } from './stockfish.js'
 
 type MoveRequest = {
@@ -62,6 +63,18 @@ type MoveCoach = {
   mood: CoachMood
   text: string
   source: 'openai' | 'rules' | 'fallback'
+  debug?: CoachDebug
+}
+
+type CoachDebug = {
+  reachedOpenAi: boolean
+  rejectedBy: string | null
+  returnedFrom: string
+  rawOutput?: string
+  parsed: boolean
+  cleanedTextLength: number
+  rawTextHadLatin: boolean
+  error?: string
 }
 
 function cleanName(name: unknown) {
@@ -87,9 +100,19 @@ function cleanCoachText(text: string) {
     .slice(0, 260)
 }
 
-function isCleanHebrewCoachText(text: string) {
-  if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return false
-  return text.trim().length > 0
+function getTextRejectionReason(text: string) {
+  if (!text.trim()) return 'empty_text'
+  if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return 'blocked_word'
+  return null
+}
+
+function shouldExposeCoachDebug() {
+  return process.env.COACH_DEBUG === '1'
+}
+
+function logCoachDecision(label: string, payload: Record<string, unknown>) {
+  if (!shouldExposeCoachDebug()) return
+  console.log(`[coach-debug:${label}]`, JSON.stringify(payload))
 }
 
 function safeParseJson(text: string) {
@@ -463,10 +486,28 @@ async function phraseMoveWithOpenAi(args: {
   trainingFocus: unknown
   facts: unknown
 }) {
+  const debug: CoachDebug = {
+    reachedOpenAi: false,
+    rejectedBy: null,
+    returnedFrom: 'not_started',
+    parsed: false,
+    cleanedTextLength: 0,
+    rawTextHadLatin: false,
+  }
+
   try {
-    const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
+    const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY'), fetch: nativeFetch })
     const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
     const facts = args.facts && typeof args.facts === 'object' ? (args.facts as Record<string, unknown>) : {}
+    debug.reachedOpenAi = true
+    debug.returnedFrom = 'openai_call'
+    logCoachDecision('reached_openai_call', {
+      model,
+      fallbackSource: args.fallback.source,
+      moveSan: args.playerMove.san,
+      mode: args.mode ?? 'regular',
+    })
+
     const response = await openai.responses.create({
       model,
       text: {
@@ -532,14 +573,46 @@ async function phraseMoveWithOpenAi(args: {
         },
       ],
     })
+    debug.returnedFrom = 'openai_returned'
+    debug.rawOutput = response.output_text
+    logCoachDecision('openai_returned', {
+      outputText: response.output_text,
+    })
 
     const parsed = safeParseJson(response.output_text)
+    debug.parsed = Boolean(parsed)
+    logCoachDecision('safe_parse_json', {
+      parsed: Boolean(parsed),
+    })
+
     const text = cleanCoachText(typeof parsed?.text === 'string' ? parsed.text : '')
+    debug.cleanedTextLength = text.length
+    debug.rawTextHadLatin = typeof parsed?.text === 'string' ? /[A-Za-z]/.test(parsed.text) : false
     const mood = parsed?.mood === 'good' || parsed?.mood === 'careful' || parsed?.mood === 'idea' ? parsed.mood : args.fallback.mood
-    if (!isCleanHebrewCoachText(text)) return args.fallback
-    return { text, mood, source: 'openai' as const }
-  } catch {
-    return args.fallback
+    const rejectedBy = getTextRejectionReason(text)
+    debug.rejectedBy = rejectedBy
+    logCoachDecision('is_clean_hebrew_coach_text', {
+      ok: rejectedBy === null,
+      rejectedBy,
+      rawTextHadLatin: debug.rawTextHadLatin,
+      cleanedTextLength: text.length,
+    })
+
+    if (rejectedBy) {
+      debug.returnedFrom = 'rejected_openai_text'
+      return { ...args.fallback, source: 'fallback' as const, debug }
+    }
+
+    debug.returnedFrom = 'openai'
+    return { text, mood, source: 'openai' as const, debug }
+  } catch (error) {
+    debug.rejectedBy = 'openai_error'
+    debug.returnedFrom = 'openai_error'
+    debug.error = error instanceof Error ? error.message : 'Unknown OpenAI error'
+    logCoachDecision('openai_error', {
+      error: debug.error,
+    })
+    return { ...args.fallback, source: 'fallback' as const, debug }
   }
 }
 
@@ -598,6 +671,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       safetyPenalty,
       moveCount,
       lessonSkill: body.lessonSkill ?? null,
+    })
+    logCoachDecision('fallback_built', {
+      source: fallbackCoach.source,
+      text: fallbackCoach.text,
     })
     const winner = afterPlayer.isCheckmate() ? (afterPlayer.turn() === 'w' ? 'black' : 'white') : null
     const trainingFocus = buildTrainingFocus({
@@ -694,7 +771,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     })
     const row = Array.isArray(recorded) ? recorded[0] : null
 
-    res.status(200).json({
+    const responseBody: Record<string, unknown> = {
       fen: afterPlayer.fen(),
       pgn: afterPlayer.pgn(),
       text: coach.text,
@@ -728,7 +805,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         ...facts,
         trainingFocus,
       },
-    })
+    }
+
+    if (shouldExposeCoachDebug() && coach.debug) {
+      responseBody.coachDebug = coach.debug
+    }
+
+    res.status(200).json(responseBody)
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : 'Move analysis failed',
