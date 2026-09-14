@@ -74,7 +74,8 @@ function shouldExposeCoachDebug() {
 }
 
 function getGuidanceRejectionReason(rawText: string, text: string, primaryFreeCapturePiece: string | null, facts: ReturnType<typeof describePosition>) {
-  const hasThreat = facts.myHangingPieces.length > 0 || facts.opponentThreats.length > 0 || facts.theme === 'king_safety'
+  const hasThreat = facts.isCheck || facts.theme === 'engine_defense'
+  const hasEngineTactic = facts.theme === 'engine_tactic' || facts.topEngineLines.some((line) => line.isCapture)
 
   if (!text.trim()) return 'empty_text'
   if (/[A-Za-z]/.test(rawText)) return 'latin_text'
@@ -86,22 +87,23 @@ function getGuidanceRejectionReason(rawText: string, text: string, primaryFreeCa
   if (facts.phase !== 'endgame' && /סוף המשחק|סיום המשחק|סוף משחק/.test(text)) return 'wrong_phase_endgame'
   if (facts.phase !== 'opening' && /לפתח|פיתוח|מרכז|שליטה במרכז/.test(text)) return 'wrong_phase_development'
   if (!hasThreat && /(בסכנה|לא מוגן|לא מוגנת|מאיים|מאיימים|להגן עליו|להגן עליה|להגן על הכלי)/.test(text)) return 'false_threat_language'
-  if (facts.theme === 'develop_piece' && /(לפתח.{0,12}(רגלי|חייל)|(רגלי|חייל).{0,12}לפתח)/.test(text)) return 'develops_pawn'
-  if (facts.theme !== 'capture_free' && facts.freeCaptures.length === 0 && /(לקחת|לתפוס|לאכול).{0,24}(של היריב|יריב|מתחרה|שחור|מלכה|צריח|רץ|סוס|רגלי|חייל)/.test(text)) return 'unsupported_capture'
-  if ((facts.theme === 'defend_hanging' || facts.theme === 'escape_threat') && /(לקחת|לתפוס|לאכול).{0,18}(של היריב|יריב|שחור)/.test(text)) return 'capture_during_threat'
-  if (facts.theme === 'capture_free' && primaryFreeCapturePiece && !text.includes(primaryFreeCapturePiece)) return 'missing_capture_piece'
+  if (!hasEngineTactic && /(לקחת|לתפוס|לאכול).{0,24}(של היריב|יריב|מתחרה|שחור|מלכה|צריח|רץ|סוס|רגלי|חייל)/.test(text)) return 'unsupported_capture'
+  if (facts.theme === 'engine_defense' && /(לקחת|לתפוס|לאכול).{0,18}(של היריב|יריב|שחור)/.test(text)) return 'capture_during_defense'
+  if (facts.theme === 'engine_tactic' && primaryFreeCapturePiece && !text.includes(primaryFreeCapturePiece)) return 'missing_capture_piece'
   return null
 }
 
 function getFallbackText(facts?: ReturnType<typeof describePosition>, threatenedPieces: string[] = []) {
   if (facts?.theme === 'king_safety') return 'המלך שלך בשח. קודם מצילים את המלך: לזוז, לחסום, או לאכול את הכלי שנותן שח.'
-  if (facts?.theme === 'capture_free') {
+  if (facts?.theme === 'engine_tactic') {
     return facts.targetPieceName
-      ? `עצור רגע — יש ${facts.targetPieceName} של היריב שאפשר לקחת בבטחה.`
-      : 'עצור רגע — יש כלי של היריב שאפשר לקחת בבטחה.'
+      ? `המנוע רואה רעיון טקטי סביב ${facts.targetPieceName} של היריב. חפשי איך להרוויח בלי לחשוף את המלך.`
+      : 'המנוע רואה רעיון טקטי. חפשי מה אפשר להרוויח בלי לחשוף את המלך.'
   }
-  if ((facts?.theme === 'defend_hanging' || facts?.theme === 'escape_threat') && threatenedPieces[0]) {
-    return `${threatenedPieces[0]} שלך בסכנה. קודם מצילים אותו, ורק אחר כך חושבים על לקיחות.`
+  if (facts?.theme === 'engine_defense') {
+    return threatenedPieces[0]
+      ? `המנוע רואה שהמצב רגיש סביב ${threatenedPieces[0]}. קודם מצאי מסע שמייצב את הלוח.`
+      : 'המנוע רואה שהמצב רגיש. קודם מצאי מסע שמייצב את הלוח.'
   }
   if (facts?.phase === 'endgame') return endgameFallbackGuidance
   if (facts?.phase === 'opening') return openingFallbackGuidance
@@ -122,7 +124,7 @@ async function phraseGuidance(args: {
 }): Promise<GuidanceResponse> {
   const threatenedSquares = args.facts.myHangingPieces.length > 0 ? args.facts.myHangingPieces : args.facts.opponentThreats
   const threatenedPieces = args.facts.targetPieceName ? [args.facts.targetPieceName] : getPiecesOnSquares(args.chess, threatenedSquares)
-  const shouldMentionCapture = args.facts.theme === 'capture_free'
+  const shouldMentionCapture = args.facts.theme === 'engine_tactic'
   const factsForPrompt = shouldMentionCapture ? args.facts : { ...args.facts, freeCaptures: [] }
   const freeCapturePieces = shouldMentionCapture ? args.facts.targetPieceName ? [args.facts.targetPieceName] : getPiecesOnSquares(args.chess, args.facts.freeCaptures) : []
   const primaryFreeCapturePiece = freeCapturePieces[0] ?? null
@@ -165,7 +167,7 @@ async function phraseGuidance(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. The chess judgment comes only from Stockfish facts: theme, scoreCp, sharedIntent, targetPieceName, phase. Never invent board facts. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. Never say vague coaching like "look at the board", "many options", "good finish", or "think how to win"; every sentence must point to a concrete chess check the child can do now. If theme is king_safety, say clearly that the king is in check and the child must first save the king; mention the three ideas: move the king, block, or capture the checking piece. If phase is not endgame, never mention endgame or the end of the game. If theme is capture_free, guide the child to notice that the targetPieceName can be taken, without naming a square or exact move; never recommend defending in that case. If theme is escape_threat or defend_hanging, guide the child to notice the targetPieceName is in danger, without giving the rescue move. If theme is develop_piece in the opening, development means bringing out a knight or bishop, not a pawn; say כלי קטן, סוס, or רץ. If theme is control_center, talk about fighting for the center without naming a square. If theme is convert_material in an endgame, talk about king safety, checks, pawn promotion, or stopping the opponent pawn. If freeCaptures is empty, never say the child can take or capture an opponent piece. If myHangingPieces and opponentThreats are empty, never imply that a piece is in danger, unprotected, or threatened. Never use English letters, chess notation, or square names like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. You may use the child word חייל for a pawn when natural. Give direction, not the exact best move.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. Stockfish at full strength is the chess judge; you translate its facts into kid-friendly guidance. Never invent board facts and never analyze from memory. Use only currentFen, facts, and topEngineLines. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. Never say vague coaching like "look at the board", "many options", "good finish", or "think how to win"; every sentence must point to a concrete chess check the child can do now. If theme is engine_tactic, guide the child to notice the capturedPieceName or targetPieceName if present, but do not name a square or give the exact move. If theme is engine_defense, explain that the position is sensitive and ask the child to find the move that stabilizes the position; do not recommend captures unless topEngineLines show the best line is a capture. If theme is improve_position and phase is opening, talk about bringing out a knight or bishop, king safety, or center control, based on topEngineLines. If theme is convert_material in an endgame, talk about king safety, checks, pawn promotion, or stopping the opponent pawn. If facts.isCheck is false, never say the king is in check. If topEngineLines do not show a capture, never say the child can take, eat, or capture an opponent piece. Never use English letters, chess notation, SAN, UCI, or square names like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. You may use the child word חייל for a pawn when natural. Give direction, not the exact best move.',
         },
         {
           role: 'user',
@@ -186,10 +188,13 @@ async function phraseGuidance(args: {
               scoreCp: args.facts.scoreCp,
               mateIn: args.facts.mateIn,
               engineSpreadCp: args.facts.engineSpreadCp,
+              isCheck: args.facts.isCheck,
+              legalMovesCount: args.facts.legalMovesCount,
+              topEngineLines: args.facts.topEngineLines,
             },
             requiredBehavior: {
-              ifThreat: 'mention that one of the child pieces is in danger, without giving the rescue move',
-              ifFreeCapture: 'mention primaryFreeCapturePiece only, without giving the exact move',
+              ifDefense: 'say the position is sensitive and invite the child to stabilize it, without giving the move',
+              ifEngineTactic: 'mention primaryFreeCapturePiece or targetPieceName only, without giving the exact move',
               noSquares: true,
               noEngineMoveNames: true,
             },
