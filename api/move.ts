@@ -99,6 +99,8 @@ function getTextRejectionReason(text: string) {
   if (!text.trim()) return 'empty_text'
   if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return 'blocked_word'
   if (bannedCoachTerms.test(text)) return 'jargon'
+  if (/רואה/.test(text)) return 'bad_piece_name'
+  if (/מה את אומרת על|מה אתה אומר על|כדאי להזיז את הרגלי|רגלי אחר לאמצע|הצד של [אבגדהוזח]|צד של [אבגדהוזח]/.test(text)) return 'reveals_next_move'
   return null
 }
 
@@ -198,6 +200,23 @@ function normalizeProfile(profile: unknown) {
   }
 }
 
+function getLocalProfile(displayName: string) {
+  return {
+    display_name: displayName,
+    level: 'מתחיל',
+    skill_scores: {
+      opening: 50,
+      tactics: 50,
+      safety: 50,
+      endgame: 50,
+      focus: 50,
+    },
+    summary: null,
+    games_played: 0,
+    moves_recorded: 0,
+  }
+}
+
 async function ensureProfile(req: ApiRequest, res: ApiResponse, displayName: string) {
   const supabase = getSupabaseClient()
   const cookieProfile = parseProfileCookie(req.headers.cookie)
@@ -250,6 +269,44 @@ function moveFromUci(chess: Chess, uci: string | null) {
   } catch {
     return null
   }
+}
+
+function chooseHumanLikeOpponentMove(
+  lines: NonNullable<Awaited<ReturnType<typeof analyzePosition>>>['lines'],
+  childSkillLevel: number,
+) {
+  const legalLines = lines.filter((line) => line.move && line.move !== '(none)')
+  if (legalLines.length === 0) return null
+
+  const bestScore = legalLines[0]?.scoreCp
+  const acceptableLossCp = childSkillLevel >= 16 ? 140 : childSkillLevel >= 10 ? 220 : 340
+  const saneLines =
+    typeof bestScore === 'number'
+      ? legalLines.filter((line) => {
+          if (line.mateIn !== null && line.mateIn < 0) return false
+          if (typeof line.scoreCp !== 'number') return true
+          return bestScore - line.scoreCp <= acceptableLossCp
+        })
+      : legalLines
+  const candidates = saneLines.length > 0 ? saneLines.slice(0, 3) : legalLines.slice(0, 3)
+
+  const weights =
+    childSkillLevel >= 16
+      ? [0.76, 0.2, 0.04]
+      : childSkillLevel >= 10
+        ? [0.56, 0.31, 0.13]
+        : childSkillLevel >= 5
+          ? [0.42, 0.36, 0.22]
+          : [0.34, 0.38, 0.28]
+
+  const roll = Math.random()
+  let cumulative = 0
+  for (let index = 0; index < candidates.length; index += 1) {
+    cumulative += weights[index] ?? 0
+    if (roll <= cumulative) return candidates[index]?.move ?? candidates[0]?.move ?? null
+  }
+
+  return candidates[candidates.length - 1]?.move ?? candidates[0]?.move ?? null
 }
 
 function formatMove(move: Move | null | undefined) {
@@ -520,7 +577,7 @@ async function phraseMoveWithOpenAi(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Use clean modern Hebrew only, one or two short sentences. Do not use English letters or chess notation like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. Never invent board facts. Stockfish facts and legal move facts are binding. If mode is guided and the game continues, speak about what to check before the next move, not generic praise. If the child blundered or left a piece unsafe, be kind but direct. Do not shame.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Use clean modern Hebrew only, one or two short sentences. Do not use English letters or chess notation like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. Never invent board facts. Stockfish facts and legal move facts are binding. Use correct Hebrew chess piece names: knight is סוס, bishop is רץ, rook is צריח, queen is מלכה, pawn is רגלי or חייל. Never say רואה for a bishop. If mode is guided and the game continues, speak about what to check before the next move, not generic praise. Give a principle, not an exact next move. Never suggest a file, square, or “move the pawn on the d/e side”. In the opening, after one center pawn is out, prefer saying to bring out a small piece such as סוס or רץ, not another pawn. If the child blundered or left a piece unsafe, be kind but direct. Do not shame.',
         },
         {
           role: 'user',
@@ -621,7 +678,15 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const childName = cleanName(body.childName)
     const moveCount = clampNumber(body.moveCount, 1, 1, 500)
     const skillLevel = clampNumber(body.skillLevel, 8, 0, 20)
-    const { supabase, auth, profile } = await ensureProfile(req, res, childName)
+    let profileContext: Awaited<ReturnType<typeof ensureProfile>> | null = null
+    try {
+      profileContext = await ensureProfile(req, res, childName)
+    } catch (error) {
+      logCoachDecision('profile_unavailable', {
+        error: error instanceof Error ? error.message : 'Unknown profile error',
+      })
+    }
+    const profile = profileContext?.profile ?? getLocalProfile(childName)
 
     if (gameBefore.turn() !== 'w' || gameBefore.isGameOver()) {
       res.status(400).json({ error: 'It is not white to move' })
@@ -638,11 +703,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const [beforeAnalysis, blackAnalysis] = await Promise.all([
       analyzePosition(typeof body.fen === 'string' ? body.fen : gameBefore.fen(), 520, 20).catch(() => null),
-      afterPlayer.isGameOver() ? Promise.resolve(null) : analyzePosition(afterPlayer.fen(), 420, skillLevel).catch(() => null),
+      afterPlayer.isGameOver() ? Promise.resolve(null) : analyzePosition(afterPlayer.fen(), 620, 20, 3).catch(() => null),
     ])
 
     const bestMove = moveFromUci(new Chess(typeof body.fen === 'string' ? body.fen : undefined), beforeAnalysis?.bestMove ?? null)
-    const stockfishBlackMove = moveFromUci(afterPlayer, blackAnalysis?.bestMove ?? null)
+    const opponentMoveUci = blackAnalysis ? chooseHumanLikeOpponentMove(blackAnalysis.lines, skillLevel) : null
+    const stockfishBlackMove = moveFromUci(afterPlayer, opponentMoveUci ?? blackAnalysis?.bestMove ?? null)
     const fallbackBlackMove = !afterPlayer.isGameOver() ? afterPlayer.moves({ verbose: true })[0] ?? null : null
     const blackMove = stockfishBlackMove ?? fallbackBlackMove
 
@@ -685,6 +751,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     })
     const facts = {
       bestMove: beforeAnalysis?.bestMove ?? null,
+      opponentMove: opponentMoveUci,
       evaluationDropCp: moveEvaluation.dropCp,
       beforeScoreCp: moveEvaluation.beforeScore,
       afterPlayerScoreCp: moveEvaluation.afterScore,
@@ -759,14 +826,23 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       },
     }
 
-    const { data: recorded } = await supabase.rpc('chess_record_move', {
-      p_child_profile_id: auth.childProfileId,
-      p_access_token: auth.accessToken,
-      p_game_id: body.gameId ?? null,
-      p_move: movePayload,
-      p_profile_patch: profilePatch,
-    })
-    const row = Array.isArray(recorded) ? recorded[0] : null
+    let row: Record<string, unknown> | null = null
+    if (profileContext) {
+      try {
+        const { data: recorded } = await profileContext.supabase.rpc('chess_record_move', {
+          p_child_profile_id: profileContext.auth.childProfileId,
+          p_access_token: profileContext.auth.accessToken,
+          p_game_id: body.gameId ?? null,
+          p_move: movePayload,
+          p_profile_patch: profilePatch,
+        })
+        row = Array.isArray(recorded) ? (recorded[0] as Record<string, unknown>) : null
+      } catch (error) {
+        logCoachDecision('record_move_unavailable', {
+          error: error instanceof Error ? error.message : 'Unknown record error',
+        })
+      }
+    }
 
     const responseBody: Record<string, unknown> = {
       fen: afterPlayer.fen(),

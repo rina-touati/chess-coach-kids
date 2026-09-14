@@ -48,11 +48,6 @@ function cleanName(name: unknown) {
   return typeof name === 'string' && name.trim() ? name.trim().slice(0, 40) : 'אלוף'
 }
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number) {
-  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback
-  return Math.max(min, Math.min(max, Math.round(numeric)))
-}
-
 function cleanCoachText(text: string) {
   return text
     .replace(/[A-Za-z]/g, '')
@@ -236,8 +231,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     const childName = cleanName(body.childName)
-    const skillLevel = clampNumber(body.skillLevel, 20, 0, 20)
-    const analysis = await analyzePosition(chess.fen(), 760, skillLevel, 3)
+    const analysis = await analyzePosition(chess.fen(), 760, 20, 3)
     const facts = describePosition(chess.fen(), analysis.lines)
     const guidance = await phraseGuidance({
       childName,
