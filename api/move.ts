@@ -14,7 +14,6 @@ import {
 } from './_shared.js'
 import { nativeFetch } from './nativeFetch.js'
 import { analyzePosition } from './stockfish.js'
-import { getMoveSafetyPenalty } from '../shared/chessSafety.js'
 
 type MoveRequest = {
   fen?: string
@@ -39,6 +38,8 @@ const pieceNames = {
   q: 'מלכה',
   k: 'מלך',
 } as const
+
+const DECISIVE = 200
 
 const skillLabels = {
   opening: 'פיתוח כלים בפתיחה',
@@ -134,6 +135,31 @@ function compactAnalysis(analysis: unknown) {
   }
 }
 
+function scoreFromWhiteView(fen: string, analysis: { scoreCp?: number | null } | null) {
+  if (!analysis || typeof analysis.scoreCp !== 'number') return null
+  const turn = new Chess(fen).turn()
+  return turn === 'w' ? analysis.scoreCp : -analysis.scoreCp
+}
+
+function getEvaluationDropCp(args: {
+  beforeFen: string
+  afterPlayerFen: string
+  beforeAnalysis: { scoreCp?: number | null } | null
+  afterPlayerAnalysis: { scoreCp?: number | null } | null
+}) {
+  const beforeScore = scoreFromWhiteView(args.beforeFen, args.beforeAnalysis)
+  const afterScore = scoreFromWhiteView(args.afterPlayerFen, args.afterPlayerAnalysis)
+  if (beforeScore === null || afterScore === null) {
+    return { beforeScore, afterScore, dropCp: 0 }
+  }
+
+  return {
+    beforeScore,
+    afterScore,
+    dropCp: Math.max(0, beforeScore - afterScore),
+  }
+}
+
 function compactProfile(profile: unknown) {
   if (!profile || typeof profile !== 'object') return null
   const source = profile as Record<string, unknown>
@@ -153,7 +179,7 @@ function compactTrainingFocus(trainingFocus: unknown) {
     topic: source.topic ?? null,
     topicLabel: source.topicLabel ?? null,
     tags: source.tags ?? null,
-    safetyPenalty: source.safetyPenalty ?? null,
+    evaluationDropCp: source.evaluationDropCp ?? null,
   }
 }
 
@@ -268,7 +294,7 @@ function getWeakestSkill(scores: Record<string, number>) {
   return Object.entries(scores).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'focus'
 }
 
-function updateSkillScores(current: Record<string, unknown>, args: { move: Move; moveCount: number; safetyPenalty: number; isCheckmate: boolean; winner: 'white' | 'black' | null }) {
+function updateSkillScores(current: Record<string, unknown>, args: { move: Move; moveCount: number; evaluationDropCp: number; isCheckmate: boolean; winner: 'white' | 'black' | null }) {
   const next = {
     opening: clampSkill(current.opening),
     tactics: clampSkill(current.tactics),
@@ -286,7 +312,7 @@ function updateSkillScores(current: Record<string, unknown>, args: { move: Move;
   }
 
   if (args.moveCount <= 8 && (movedFromHome(args.move) || isCenterMove(args.move))) next.opening += 1
-  if (args.safetyPenalty > 250) {
+  if (args.evaluationDropCp > DECISIVE) {
     next.safety -= 3
     next.focus -= 2
   }
@@ -300,7 +326,7 @@ function buildTrainingFocus(args: {
   mode: MoveRequest['mode']
   move: Move
   moveCount: number
-  safetyPenalty: number
+  evaluationDropCp: number
   bestMove: string | null
   finalGame: Chess
   beforeAnalysis: unknown
@@ -317,7 +343,7 @@ function buildTrainingFocus(args: {
   } else if (args.finalGame.isCheck()) {
     topic = 'focus'
     tags.push('check')
-  } else if (args.safetyPenalty > 250) {
+  } else if (args.evaluationDropCp > DECISIVE) {
     topic = 'safety'
     tags.push('piece_safety')
   } else if (args.move.san.includes('x') || args.move.san.includes('+') || args.move.san.includes('#')) {
@@ -337,7 +363,7 @@ function buildTrainingFocus(args: {
     tags,
     bestMove: args.bestMove,
     moveSan: args.move.san,
-    safetyPenalty: args.safetyPenalty,
+    evaluationDropCp: args.evaluationDropCp,
     engine: {
       beforeMove: args.beforeAnalysis,
       afterPlayerMove: args.afterPlayerAnalysis,
@@ -352,7 +378,7 @@ function buildMoveCoachText(args: {
   blackMove: Move | null
   bestMove: Move | null
   finalGame: Chess
-  safetyPenalty: number
+  evaluationDropCp: number
   moveCount: number
   lessonSkill: MoveRequest['lessonSkill']
 }): MoveCoach {
@@ -390,10 +416,10 @@ function buildMoveCoachText(args: {
     }
   }
 
-  if (args.safetyPenalty > 250) {
+  if (args.evaluationDropCp > DECISIVE) {
     return {
       mood: 'careful' as const,
-      text: `${args.childName}, ה${played} נשאר במקום מסוכן. לפני שמזיזים כלי, שואלים: מי יכול לאכול אותו, ומי שומר עליו?`,
+      text: `${args.childName}, אחרי המסע הזה המנוע רואה שהעמדה שלך נחלשה. לפני המסע הבא נחפש מה היריב מאיים, ואיך לשמור על הכלי החשוב.`,
       source: 'rules' as const,
     }
   }
@@ -446,7 +472,7 @@ async function phraseMoveWithOpenAi(args: {
   blackMove: Move | null
   bestMove: string | null
   finalGame: Chess
-  safetyPenalty: number
+  evaluationDropCp: number
   trainingFocus: unknown
   facts: unknown
 }) {
@@ -525,7 +551,7 @@ async function phraseMoveWithOpenAi(args: {
               isDraw: args.finalGame.isDraw(),
               turn: args.finalGame.turn(),
             },
-            safetyPenalty: args.safetyPenalty,
+            evaluationDropCp: args.evaluationDropCp,
             trainingFocus: compactTrainingFocus(args.trainingFocus),
             engineFacts: {
               beforeMove: compactAnalysis(facts.beforeAnalysis),
@@ -609,7 +635,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       promotion: requestedMove?.promotion ?? 'q',
     })
     const afterPlayer = new Chess(gameBefore.fen())
-    const safetyPenalty = getMoveSafetyPenalty(afterPlayer, playerMove)
 
     const [beforeAnalysis, blackAnalysis] = await Promise.all([
       analyzePosition(typeof body.fen === 'string' ? body.fen : gameBefore.fen(), 520, 20).catch(() => null),
@@ -625,6 +650,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       afterPlayer.move({ from: blackMove.from, to: blackMove.to, promotion: blackMove.promotion ?? 'q' })
     }
 
+    const moveEvaluation = getEvaluationDropCp({
+      beforeFen: typeof body.fen === 'string' ? body.fen : gameBefore.fen(),
+      afterPlayerFen: gameBefore.fen(),
+      beforeAnalysis,
+      afterPlayerAnalysis: blackAnalysis,
+    })
     const afterBlackAnalysis = afterPlayer.isGameOver() ? null : await analyzePosition(afterPlayer.fen(), 220, 20).catch(() => null)
     const fallbackCoach = buildMoveCoachText({
       childName,
@@ -632,7 +663,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       blackMove,
       bestMove,
       finalGame: afterPlayer,
-      safetyPenalty,
+      evaluationDropCp: moveEvaluation.dropCp,
       moveCount,
       lessonSkill: body.lessonSkill ?? null,
     })
@@ -645,7 +676,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       mode: body.mode,
       move: playerMove,
       moveCount,
-      safetyPenalty,
+      evaluationDropCp: moveEvaluation.dropCp,
       bestMove: beforeAnalysis?.bestMove ?? null,
       finalGame: afterPlayer,
       beforeAnalysis,
@@ -654,7 +685,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     })
     const facts = {
       bestMove: beforeAnalysis?.bestMove ?? null,
-      safetyPenalty,
+      evaluationDropCp: moveEvaluation.dropCp,
+      beforeScoreCp: moveEvaluation.beforeScore,
+      afterPlayerScoreCp: moveEvaluation.afterScore,
       beforeAnalysis,
       afterPlayerAnalysis: blackAnalysis,
       afterBlackAnalysis,
@@ -668,7 +701,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       blackMove,
       bestMove: beforeAnalysis?.bestMove ?? null,
       finalGame: afterPlayer,
-      safetyPenalty,
+      evaluationDropCp: moveEvaluation.dropCp,
       trainingFocus,
       facts,
     })
@@ -680,7 +713,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const skillScores = updateSkillScores(currentScores, {
       move: playerMove,
       moveCount,
-      safetyPenalty,
+      evaluationDropCp: moveEvaluation.dropCp,
       isCheckmate: afterPlayer.isCheckmate(),
       winner,
     })

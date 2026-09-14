@@ -1,6 +1,9 @@
-import { Chess, type Square } from 'chess.js'
-import { getMoveSafetyPenalty, getPieceValueOnSquare, isPieceHanging, pieceValues } from '../shared/chessSafety.js'
+import { Chess, type Move, type PieceSymbol, type Square } from 'chess.js'
+import { pieceValues } from '../shared/chessSafety.js'
 import type { StockfishLine } from './stockfish.js'
+
+const DECISIVE = 200
+const CLOSE_LINES = 90
 
 export type PositionTheme =
   | 'defend_hanging'
@@ -19,6 +22,22 @@ export type PositionFacts = {
   freeCaptures: Square[]
   theme: PositionTheme
   sharedIntent: string | null
+  bestMove: string | null
+  scoreCp: number | null
+  mateIn: number | null
+  targetPieceName: string | null
+  targetPieceSquare: Square | null
+  engineSpreadCp: number | null
+  isEngineDerived: true
+}
+
+const pieceNames: Record<PieceSymbol, string> = {
+  p: 'רגלי',
+  n: 'סוס',
+  b: 'רץ',
+  r: 'צריח',
+  q: 'מלכה',
+  k: 'מלך',
 }
 
 function getPhase(chess: Chess): PositionFacts['phase'] {
@@ -34,104 +53,29 @@ function getPhase(chess: Chess): PositionFacts['phase'] {
   return 'middlegame'
 }
 
-function attacksHigherValueTarget(chess: Chess, attackerSquare: Square, targets: Square[], attackerColor: 'w' | 'b') {
-  const attackerValue = getPieceValueOnSquare(chess, attackerSquare)
-  return targets.some((target) => chess.attackers(target, attackerColor).includes(attackerSquare) && getPieceValueOnSquare(chess, target) > attackerValue)
-}
+function moveFromUci(chess: Chess, uci: string | null | undefined) {
+  if (!uci || uci.length < 4) return null
 
-function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
-  const hanging: Square[] = []
-
-  for (const row of chess.board()) {
-    for (const piece of row) {
-      if (!piece || piece.color !== myColor || piece.type === 'k') continue
-
-      const square = piece.square as Square
-      if (attacksHigherValueTarget(chess, square, freeCaptures, myColor)) continue
-      if (isPieceHanging(chess, square, myColor)) hanging.push(square)
-    }
-  }
-
-  return hanging.sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
-}
-
-function getOpponentThreats(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
-  const enemy = myColor === 'w' ? 'b' : 'w'
-  const currentTurn = chess.turn()
-  if (currentTurn !== enemy) {
-    const legalThreats = new Set<Square>()
-
-    for (const row of chess.board()) {
-      for (const piece of row) {
-        if (!piece || piece.color !== myColor || piece.type === 'k') continue
-        if (attacksHigherValueTarget(chess, piece.square as Square, freeCaptures, myColor)) continue
-        if (isPieceHanging(chess, piece.square as Square, myColor)) legalThreats.add(piece.square as Square)
-      }
-    }
-
-    return [...legalThreats].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
-  }
-
-  const threats = new Set<Square>()
-  for (const move of chess.moves({ verbose: true })) {
-    if (
-      move.captured &&
-      move.color === enemy &&
-      !attacksHigherValueTarget(chess, move.to as Square, freeCaptures, myColor) &&
-      isPieceHanging(chess, move.to as Square, myColor)
-    ) {
-      threats.add(move.to as Square)
-    }
-  }
-
-  return [...threats].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
-}
-
-function getFreeCaptures(chess: Chess, myColor: 'w' | 'b') {
-  const captureScores = new Map<Square, number>()
-
-  for (const move of chess.moves({ verbose: true })) {
-    if (move.color !== myColor || !move.captured) continue
-
-    const afterCapture = new Chess(chess.fen())
-    afterCapture.move({
-      from: move.from as Square,
-      to: move.to as Square,
-      promotion: move.promotion ?? 'q',
-    })
-
-    const capturedValue = pieceValues[move.captured]
-    const safetyPenalty = getMoveSafetyPenalty(afterCapture, move)
-    const netGain = capturedValue - safetyPenalty
-
-    if (netGain <= 0) continue
-
-    const target = move.to as Square
-    const previousScore = captureScores.get(target) ?? -Infinity
-    captureScores.set(target, Math.max(previousScore, netGain))
-  }
-
-  return [...captureScores.entries()]
-    .sort((a, b) => b[1] - a[1] || getPieceValueOnSquare(chess, b[0]) - getPieceValueOnSquare(chess, a[0]))
-    .map(([square]) => square)
-}
-
-function classifyEngineMove(chess: Chess, uci: string) {
   try {
-    const move = new Chess(chess.fen()).move({
+    return new Chess(chess.fen()).move({
       from: uci.slice(0, 2) as Square,
       to: uci.slice(2, 4) as Square,
       promotion: (uci[4] as 'q' | 'r' | 'b' | 'n' | undefined) ?? 'q',
     })
-
-    if (move.san.includes('#') || move.san.includes('+')) return 'find_check'
-    if (move.captured) return 'convert_material'
-    if (['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5'].includes(move.to)) return 'control_center'
-    if (move.piece === 'n' || move.piece === 'b') return 'develop_piece'
-    return null
   } catch {
     return null
   }
+}
+
+function classifyEngineMove(chess: Chess, uci: string) {
+  const move = moveFromUci(chess, uci)
+  if (!move) return null
+
+  if (move.san.includes('#') || move.san.includes('+')) return 'find_check'
+  if (move.captured) return 'convert_material'
+  if (['d4', 'e4', 'd5', 'e5', 'c4', 'f4', 'c5', 'f5'].includes(move.to)) return 'control_center'
+  if (move.piece === 'n' || move.piece === 'b') return 'develop_piece'
+  return null
 }
 
 function getSharedIntent(chess: Chess, engineLines: StockfishLine[]) {
@@ -145,53 +89,146 @@ function getSharedIntent(chess: Chess, engineLines: StockfishLine[]) {
   return intents.every((intent) => intent === first) ? first : null
 }
 
-function chooseTheme(
-  chess: Chess,
-  phase: PositionFacts['phase'],
-  engineLines: StockfishLine[],
-  myHangingPieces: Square[],
-  opponentThreats: Square[],
-  freeCaptures: Square[],
-): PositionTheme {
-  const sharedIntent = getSharedIntent(chess, engineLines)
-  if (sharedIntent === 'find_check') return 'find_check'
+function scoreFromChildView(chess: Chess, line: StockfishLine | undefined) {
+  if (!line || typeof line.scoreCp !== 'number') return null
 
-  if (myHangingPieces.length > 0) return 'defend_hanging'
-  if (opponentThreats.length > 0) return 'escape_threat'
-  if (freeCaptures.length > 0) return 'capture_free'
-  if (chess.isCheck()) return 'king_safety'
+  // Stockfish reports score from the side-to-move view. The child plays white.
+  return chess.turn() === 'w' ? line.scoreCp : -line.scoreCp
+}
 
-  if (
-    sharedIntent === 'convert_material' ||
-    sharedIntent === 'control_center' ||
-    sharedIntent === 'develop_piece'
-  ) {
-    return sharedIntent
+function getEngineSpread(chess: Chess, engineLines: StockfishLine[]) {
+  const scores = engineLines
+    .slice(0, 3)
+    .map((line) => scoreFromChildView(chess, line))
+    .filter((score): score is number => typeof score === 'number')
+
+  if (scores.length < 2) return null
+  return Math.max(...scores) - Math.min(...scores)
+}
+
+function getTargetPiece(chess: Chess, move: Move | null, theme: PositionTheme) {
+  if (!move) return { targetPieceName: null, targetPieceSquare: null }
+
+  if (theme === 'capture_free' && move.captured) {
+    return {
+      targetPieceName: pieceNames[move.captured],
+      targetPieceSquare: move.to as Square,
+    }
   }
+
+  const sourcePiece = chess.get(move.from as Square)
+  if (theme === 'develop_piece' && sourcePiece?.type === 'p') {
+    return {
+      targetPieceName: null,
+      targetPieceSquare: null,
+    }
+  }
+
+  return {
+    targetPieceName: sourcePiece ? pieceNames[sourcePiece.type] : null,
+    targetPieceSquare: move.from as Square,
+  }
+}
+
+function deriveQuietTheme(phase: PositionFacts['phase'], sharedIntent: string | null): PositionTheme {
+  if (sharedIntent === 'find_check') return 'find_check'
+  if (sharedIntent === 'control_center') return 'control_center'
+  if (sharedIntent === 'develop_piece') return 'develop_piece'
+  if (sharedIntent === 'convert_material' && phase === 'endgame') return 'convert_material'
 
   if (phase === 'opening') return 'develop_piece'
   if (phase === 'endgame') return 'convert_material'
-  return 'find_check'
+  return 'control_center'
 }
 
-export function describePosition(fen: string, engineLines: StockfishLine[], opponentBestReply?: string | null): PositionFacts {
+function topLinesMoveSamePiece(engineLines: StockfishLine[]) {
+  const topMoves = engineLines.slice(0, 3).map((line) => line.move).filter((move) => move.length >= 4)
+  if (topMoves.length < 2) return false
+  const [from] = topMoves[0] ? [topMoves[0].slice(0, 2)] : [null]
+  return Boolean(from) && topMoves.every((move) => move.slice(0, 2) === from)
+}
+
+function deriveTheme(chess: Chess, phase: PositionFacts['phase'], engineLines: StockfishLine[]) {
+  const bestLine = engineLines[0]
+  const bestScore = scoreFromChildView(chess, bestLine)
+  const bestMove = moveFromUci(chess, bestLine?.move)
+  const sharedIntent = getSharedIntent(chess, engineLines)
+  const engineSpreadCp = getEngineSpread(chess, engineLines)
+  const secondScore = scoreFromChildView(chess, engineLines[1])
+
+  if (bestLine?.mateIn && bestLine.mateIn > 0 && bestLine.mateIn <= 3) {
+    return { theme: 'find_check' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  const onlyGoodMove =
+    typeof bestScore === 'number' &&
+    typeof secondScore === 'number' &&
+    bestScore > -DECISIVE &&
+    bestScore - secondScore >= DECISIVE
+
+  const bestCapturesValuablePiece =
+    bestMove?.captured &&
+    bestMove.captured !== 'p' &&
+    typeof bestScore === 'number' &&
+    bestScore > -DECISIVE * 2
+
+  if (bestMove?.captured && (bestCapturesValuablePiece || (typeof bestScore === 'number' && bestScore >= DECISIVE))) {
+    return { theme: 'capture_free' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  if (typeof bestScore === 'number' && bestScore <= -DECISIVE) {
+    return { theme: 'escape_threat' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  if (topLinesMoveSamePiece(engineLines) && typeof bestScore === 'number' && bestScore < DECISIVE) {
+    return { theme: 'defend_hanging' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  if (onlyGoodMove && !bestMove?.captured) {
+    return { theme: 'defend_hanging' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  if (phase === 'endgame' && typeof bestScore === 'number' && bestScore >= DECISIVE) {
+    return { theme: 'convert_material' as const, sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  if (
+    typeof bestScore === 'number' &&
+    Math.abs(bestScore) < DECISIVE &&
+    (engineSpreadCp === null || engineSpreadCp <= CLOSE_LINES)
+  ) {
+    return { theme: deriveQuietTheme(phase, sharedIntent), sharedIntent, bestMove, bestScore, engineSpreadCp }
+  }
+
+  return { theme: deriveQuietTheme(phase, sharedIntent), sharedIntent, bestMove, bestScore, engineSpreadCp }
+}
+
+export function describePosition(fen: string, engineLines: StockfishLine[]): PositionFacts {
   const chess = new Chess(fen)
-  const myColor = chess.turn()
   const phase = getPhase(chess)
-  const freeCaptures = getFreeCaptures(chess, myColor)
-  const myHangingPieces = getMyHangingPieces(chess, myColor, freeCaptures)
-  const opponentThreats = getOpponentThreats(chess, myColor, freeCaptures)
-  const theme =
-    opponentBestReply && myHangingPieces.length > 0
-      ? 'escape_threat'
-      : chooseTheme(chess, phase, engineLines, myHangingPieces, opponentThreats, freeCaptures)
+  const derived = deriveTheme(chess, phase, engineLines)
+  const targetPiece = getTargetPiece(chess, derived.bestMove, derived.theme)
+  const threatSquares =
+    derived.theme === 'defend_hanging' || derived.theme === 'escape_threat'
+      ? targetPiece.targetPieceSquare
+        ? [targetPiece.targetPieceSquare]
+        : []
+      : []
+  const captureSquares = derived.theme === 'capture_free' && targetPiece.targetPieceSquare ? [targetPiece.targetPieceSquare] : []
 
   return {
     phase,
-    myHangingPieces,
-    opponentThreats,
-    freeCaptures,
-    theme,
-    sharedIntent: getSharedIntent(chess, engineLines),
+    myHangingPieces: threatSquares,
+    opponentThreats: [],
+    freeCaptures: captureSquares,
+    theme: derived.theme,
+    sharedIntent: derived.sharedIntent,
+    bestMove: engineLines[0]?.move ?? null,
+    scoreCp: derived.bestScore,
+    mateIn: engineLines[0]?.mateIn ?? null,
+    targetPieceName: targetPiece.targetPieceName,
+    targetPieceSquare: targetPiece.targetPieceSquare,
+    engineSpreadCp: derived.engineSpreadCp,
+    isEngineDerived: true,
   }
 }
