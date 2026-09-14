@@ -20,6 +20,7 @@ type GuidanceResponse = {
 }
 
 const fallbackGuidance = 'עצור רגע — מה היריב מאיים, ואיזה כלי שלך לא מוגן?'
+const captureFallbackGuidance = 'עצור רגע — יש כלי של היריב שאפשר לקחת בבטחה. איזה כלי נשאר בלי הגנה?'
 
 const pieceNames: Record<PieceSymbol, string> = {
   p: 'רגלי',
@@ -60,13 +61,18 @@ function safeParseJson(text: string) {
   }
 }
 
-function isCleanGuidanceText(rawText: string, text: string) {
+function isCleanGuidanceText(rawText: string, text: string, primaryFreeCapturePiece: string | null, facts: ReturnType<typeof describePosition>) {
   if (!text.trim()) return false
   if (/[A-Za-z]/.test(rawText)) return false
   if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return false
   if (/[a-h][1-8]/i.test(rawText)) return false
   if (/רעיון טוב עכשיו/.test(text)) return false
+  if (facts.theme === 'capture_free' && primaryFreeCapturePiece && !text.includes(primaryFreeCapturePiece)) return false
   return true
+}
+
+function getFallbackText(facts?: ReturnType<typeof describePosition>) {
+  return facts?.theme === 'capture_free' ? captureFallbackGuidance : fallbackGuidance
 }
 
 function getPiecesOnSquares(chess: Chess, squares: Square[]) {
@@ -85,6 +91,8 @@ async function phraseGuidance(args: {
     const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
     const threatenedSquares = args.facts.myHangingPieces.length > 0 ? args.facts.myHangingPieces : args.facts.opponentThreats
     const threatenedPieces = getPiecesOnSquares(args.chess, threatenedSquares)
+    const freeCapturePieces = getPiecesOnSquares(args.chess, args.facts.freeCaptures)
+    const primaryFreeCapturePiece = freeCapturePieces[0] ?? null
 
     const response = await openai.responses.create({
       model,
@@ -108,7 +116,7 @@ async function phraseGuidance(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. Never use English letters, chess notation, or square names like e4. Never reveal the exact best move. Do not name a piece because of engineLines. You may name a piece only if it appears in threatenedPieces, because that comes from board facts. If facts.theme is defend_hanging or escape_threat, mention the threatened piece when available, guide the child to notice it is in danger, and ask what protects it; never talk about development or center first. If there is an active threat, it is more important than developing a piece. Give direction, not the answer.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. Never use English letters, chess notation, or square names like e4. Never reveal the exact best move. Do not name a piece because of engineLines. You may name a piece only if it appears in threatenedPieces or freeCapturePieces, because that comes from board facts. If facts.theme is capture_free, guide the child to notice that an opponent piece can be taken, without naming a square or exact move; never recommend defending in that case. In capture_free, if primaryFreeCapturePiece is not null, mention exactly that piece and do not mention another capturable piece. If facts.theme is defend_hanging or escape_threat, mention the threatened piece when available, guide the child to notice it is in danger, and ask what protects it; never talk about development or center first. If there is an active threat, it is more important than developing a piece. Give direction, not the answer.',
         },
         {
           role: 'user',
@@ -117,6 +125,8 @@ async function phraseGuidance(args: {
             turn: args.chess.turn(),
             facts: args.facts,
             threatenedPieces,
+            freeCapturePieces,
+            primaryFreeCapturePiece,
             weakestSkill: args.weakestSkill ?? null,
             engineLines: args.engineLines.map((line) => ({
               rank: line.rank,
@@ -125,6 +135,7 @@ async function phraseGuidance(args: {
             })),
             requiredBehavior: {
               ifThreat: 'mention that one of the child pieces is in danger, without giving the rescue move',
+              ifFreeCapture: 'mention primaryFreeCapturePiece only, without giving the exact move',
               noSquares: true,
               noEngineMoveNames: true,
             },
@@ -138,13 +149,13 @@ async function phraseGuidance(args: {
     const text = cleanCoachText(rawText)
     const mood = parsed?.mood === 'good' || parsed?.mood === 'careful' || parsed?.mood === 'idea' ? parsed.mood : 'idea'
 
-    if (!isCleanGuidanceText(rawText, text)) {
-      return { text: fallbackGuidance, mood: 'idea', source: 'fallback', facts: args.facts }
+    if (!isCleanGuidanceText(rawText, text, primaryFreeCapturePiece, args.facts)) {
+      return { text: getFallbackText(args.facts), mood: 'idea', source: 'fallback', facts: args.facts }
     }
 
     return { text, mood, source: 'openai', facts: args.facts }
   } catch {
-    return { text: fallbackGuidance, mood: 'idea', source: 'fallback', facts: args.facts }
+    return { text: getFallbackText(args.facts), mood: 'idea', source: 'fallback', facts: args.facts }
   }
 }
 

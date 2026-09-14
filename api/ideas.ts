@@ -1,10 +1,11 @@
 import { Chess, type Square } from 'chess.js'
-import { isPieceHanging, pieceValues } from '../shared/chessSafety.js'
+import { getPieceValueOnSquare, isPieceHanging, pieceValues } from '../shared/chessSafety.js'
 import type { StockfishLine } from './stockfish.js'
 
 export type PositionTheme =
   | 'defend_hanging'
   | 'escape_threat'
+  | 'capture_free'
   | 'develop_piece'
   | 'control_center'
   | 'king_safety'
@@ -15,6 +16,7 @@ export type PositionFacts = {
   phase: 'opening' | 'middlegame' | 'endgame'
   myHangingPieces: Square[]
   opponentThreats: Square[]
+  freeCaptures: Square[]
   theme: PositionTheme
   sharedIntent: string | null
 }
@@ -32,7 +34,11 @@ function getPhase(chess: Chess): PositionFacts['phase'] {
   return 'middlegame'
 }
 
-function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b') {
+function attacksAnySquare(chess: Chess, attackerSquare: Square, targets: Square[], attackerColor: 'w' | 'b') {
+  return targets.some((target) => chess.attackers(target, attackerColor).includes(attackerSquare))
+}
+
+function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
   const hanging: Square[] = []
 
   for (const row of chess.board()) {
@@ -40,6 +46,7 @@ function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b') {
       if (!piece || piece.color !== myColor || piece.type === 'k') continue
 
       const square = piece.square as Square
+      if (attacksAnySquare(chess, square, freeCaptures, myColor)) continue
       if (isPieceHanging(chess, square, myColor)) hanging.push(square)
     }
   }
@@ -47,7 +54,7 @@ function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b') {
   return hanging
 }
 
-function getOpponentThreats(chess: Chess, myColor: 'w' | 'b') {
+function getOpponentThreats(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
   const enemy = myColor === 'w' ? 'b' : 'w'
   const currentTurn = chess.turn()
   if (currentTurn !== enemy) {
@@ -56,6 +63,7 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b') {
     for (const row of chess.board()) {
       for (const piece of row) {
         if (!piece || piece.color !== myColor || piece.type === 'k') continue
+        if (attacksAnySquare(chess, piece.square as Square, freeCaptures, myColor)) continue
         if (isPieceHanging(chess, piece.square as Square, myColor)) legalThreats.add(piece.square as Square)
       }
     }
@@ -65,10 +73,33 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b') {
 
   const threats = new Set<Square>()
   for (const move of chess.moves({ verbose: true })) {
-    if (move.captured && move.color === enemy && isPieceHanging(chess, move.to as Square, myColor)) threats.add(move.to as Square)
+    if (
+      move.captured &&
+      move.color === enemy &&
+      !attacksAnySquare(chess, move.to as Square, freeCaptures, myColor) &&
+      isPieceHanging(chess, move.to as Square, myColor)
+    ) {
+      threats.add(move.to as Square)
+    }
   }
 
   return [...threats]
+}
+
+function getFreeCaptures(chess: Chess, myColor: 'w' | 'b') {
+  const enemyColor = myColor === 'w' ? 'b' : 'w'
+  const freeCaptures = new Set<Square>()
+
+  for (const row of chess.board()) {
+    for (const piece of row) {
+      if (!piece || piece.color !== enemyColor || piece.type === 'k') continue
+
+      const square = piece.square as Square
+      if (isPieceHanging(chess, square, enemyColor)) freeCaptures.add(square)
+    }
+  }
+
+  return [...freeCaptures].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
 }
 
 function classifyEngineMove(chess: Chess, uci: string) {
@@ -106,13 +137,21 @@ function chooseTheme(
   engineLines: StockfishLine[],
   myHangingPieces: Square[],
   opponentThreats: Square[],
+  freeCaptures: Square[],
 ): PositionTheme {
+  const sharedIntent = getSharedIntent(chess, engineLines)
+  if (sharedIntent === 'find_check') return 'find_check'
+
   if (myHangingPieces.length > 0) return 'defend_hanging'
   if (opponentThreats.length > 0) return 'escape_threat'
+  if (freeCaptures.length > 0) return 'capture_free'
   if (chess.isCheck()) return 'king_safety'
 
-  const sharedIntent = getSharedIntent(chess, engineLines)
-  if (sharedIntent === 'find_check' || sharedIntent === 'convert_material' || sharedIntent === 'control_center' || sharedIntent === 'develop_piece') {
+  if (
+    sharedIntent === 'convert_material' ||
+    sharedIntent === 'control_center' ||
+    sharedIntent === 'develop_piece'
+  ) {
     return sharedIntent
   }
 
@@ -125,15 +164,19 @@ export function describePosition(fen: string, engineLines: StockfishLine[], oppo
   const chess = new Chess(fen)
   const myColor = chess.turn()
   const phase = getPhase(chess)
-  const myHangingPieces = getMyHangingPieces(chess, myColor)
-  const opponentThreats = getOpponentThreats(chess, myColor)
+  const freeCaptures = getFreeCaptures(chess, myColor)
+  const myHangingPieces = getMyHangingPieces(chess, myColor, freeCaptures)
+  const opponentThreats = getOpponentThreats(chess, myColor, freeCaptures)
   const theme =
-    opponentBestReply && myHangingPieces.length > 0 ? 'escape_threat' : chooseTheme(chess, phase, engineLines, myHangingPieces, opponentThreats)
+    opponentBestReply && myHangingPieces.length > 0
+      ? 'escape_threat'
+      : chooseTheme(chess, phase, engineLines, myHangingPieces, opponentThreats, freeCaptures)
 
   return {
     phase,
     myHangingPieces,
     opponentThreats,
+    freeCaptures,
     theme,
     sharedIntent: getSharedIntent(chess, engineLines),
   }
