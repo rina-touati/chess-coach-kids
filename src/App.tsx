@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
 import { Lightbulb, Mic, Play, Target, Volume2 } from 'lucide-react'
+import { getMoveSafetyPenalty } from '../shared/chessSafety'
 import { lichessMateLessons, type LichessPuzzleSeed } from './puzzles/lichessMateLessons'
 import './App.css'
 
@@ -467,40 +468,6 @@ function scoreMoveForOrdering(move: Move) {
   const promotionBonus = move.promotion ? pieceValues[move.promotion] : 0
 
   return captured * 10 - attacker + checkBonus + promotionBonus
-}
-
-function getPieceValueOnSquare(chess: Chess, square: string) {
-  const piece = chess.get(square as Square)
-  return piece ? pieceValues[piece.type] : 0
-}
-
-function getLeastAttackerValue(chess: Chess, square: string, color: 'w' | 'b') {
-  const attackers = chess.attackers(square as Square, color)
-  if (attackers.length === 0) return null
-
-  return Math.min(...attackers.map((attackerSquare) => getPieceValueOnSquare(chess, attackerSquare)))
-}
-
-function getMoveSafetyPenalty(chessAfterMove: Chess, move: Move) {
-  if (move.san.includes('#')) return 0
-
-  const movedPiece = chessAfterMove.get(move.to as Square)
-  if (!movedPiece) return 0
-
-  const enemyColor = movedPiece.color === 'w' ? 'b' : 'w'
-  const ownColor = movedPiece.color
-  const enemyAttackerValue = getLeastAttackerValue(chessAfterMove, move.to, enemyColor)
-
-  if (enemyAttackerValue === null) return 0
-
-  const ownDefenderValue = getLeastAttackerValue(chessAfterMove, move.to, ownColor)
-  const movedPieceValue = move.promotion ? pieceValues[move.promotion] : pieceValues[movedPiece.type]
-
-  if (ownDefenderValue === null) return movedPieceValue + 120
-  if (enemyAttackerValue <= movedPieceValue && ownDefenderValue > enemyAttackerValue) return Math.round(movedPieceValue * 0.65)
-  if (enemyAttackerValue > movedPieceValue && ownDefenderValue > movedPieceValue) return Math.round(movedPieceValue * 0.45)
-
-  return 0
 }
 
 function adjustScoreForSafety(score: number, movingColor: 'w' | 'b', safetyPenalty: number) {

@@ -1,4 +1,5 @@
-import { Chess, type PieceSymbol, type Square } from 'chess.js'
+import { Chess, type Square } from 'chess.js'
+import { isPieceHanging, pieceValues } from '../shared/chessSafety.js'
 import type { StockfishLine } from './stockfish.js'
 
 export type PositionTheme =
@@ -18,26 +19,6 @@ export type PositionFacts = {
   sharedIntent: string | null
 }
 
-const pieceValues: Record<PieceSymbol, number> = {
-  p: 100,
-  n: 320,
-  b: 330,
-  r: 500,
-  q: 900,
-  k: 0,
-}
-
-function getPieceValueOnSquare(chess: Chess, square: Square) {
-  const piece = chess.get(square)
-  return piece ? pieceValues[piece.type] : 0
-}
-
-function getLeastAttackerValue(chess: Chess, square: Square, color: 'w' | 'b') {
-  const attackers = chess.attackers(square, color)
-  if (attackers.length === 0) return null
-  return Math.min(...attackers.map((attackerSquare) => getPieceValueOnSquare(chess, attackerSquare as Square)))
-}
-
 function getPhase(chess: Chess): PositionFacts['phase'] {
   const board = chess.board().flat()
   const pieces = board.filter(Boolean)
@@ -52,7 +33,6 @@ function getPhase(chess: Chess): PositionFacts['phase'] {
 }
 
 function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b') {
-  const enemyColor = myColor === 'w' ? 'b' : 'w'
   const hanging: Square[] = []
 
   for (const row of chess.board()) {
@@ -60,17 +40,7 @@ function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b') {
       if (!piece || piece.color !== myColor || piece.type === 'k') continue
 
       const square = piece.square as Square
-      const enemyAttackerValue = getLeastAttackerValue(chess, square, enemyColor)
-      if (enemyAttackerValue === null) continue
-
-      const ownDefenderValue = getLeastAttackerValue(chess, square, myColor)
-      const pieceValue = pieceValues[piece.type]
-      const isUnsafe =
-        ownDefenderValue === null ||
-        enemyAttackerValue <= pieceValue ||
-        (enemyAttackerValue < pieceValue && ownDefenderValue > enemyAttackerValue)
-
-      if (isUnsafe) hanging.push(square)
+      if (isPieceHanging(chess, square, myColor)) hanging.push(square)
     }
   }
 
@@ -86,7 +56,7 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b') {
     for (const row of chess.board()) {
       for (const piece of row) {
         if (!piece || piece.color !== myColor || piece.type === 'k') continue
-        if (chess.attackers(piece.square as Square, enemy).length > 0) legalThreats.add(piece.square as Square)
+        if (isPieceHanging(chess, piece.square as Square, myColor)) legalThreats.add(piece.square as Square)
       }
     }
 
@@ -95,7 +65,7 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b') {
 
   const threats = new Set<Square>()
   for (const move of chess.moves({ verbose: true })) {
-    if (move.captured && move.color === enemy) threats.add(move.to as Square)
+    if (move.captured && move.color === enemy && isPieceHanging(chess, move.to as Square, myColor)) threats.add(move.to as Square)
   }
 
   return [...threats]

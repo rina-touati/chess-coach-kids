@@ -14,6 +14,7 @@ import {
 } from './_shared.js'
 import { nativeFetch } from './nativeFetch.js'
 import { analyzePosition } from './stockfish.js'
+import { getMoveSafetyPenalty } from '../shared/chessSafety.js'
 
 type MoveRequest = {
   fen?: string
@@ -29,15 +30,6 @@ type MoveRequest = {
     promotion?: 'q' | 'r' | 'b' | 'n'
   }
 }
-
-const pieceValues = {
-  p: 100,
-  n: 320,
-  b: 330,
-  r: 500,
-  q: 900,
-  k: 0,
-} as const
 
 const pieceNames = {
   p: 'רגלי',
@@ -267,37 +259,6 @@ function openingExplanation(move: Move) {
   }
 
   return 'זה מסע חוקי. בתחילת המשחק אנחנו רוצים להוציא סוסים ורצים, לתפוס את האמצע, ולשמור על המלך.'
-}
-
-function getPieceValueOnSquare(chess: Chess, square: string) {
-  const piece = chess.get(square as Square)
-  return piece ? pieceValues[piece.type] : 0
-}
-
-function getLeastAttackerValue(chess: Chess, square: string, color: 'w' | 'b') {
-  const attackers = chess.attackers(square as Square, color)
-  if (attackers.length === 0) return null
-  return Math.min(...attackers.map((attackerSquare) => getPieceValueOnSquare(chess, attackerSquare)))
-}
-
-function getMoveSafetyPenalty(chessAfterMove: Chess, move: Move) {
-  if (move.san.includes('#')) return 0
-
-  const movedPiece = chessAfterMove.get(move.to as Square)
-  if (!movedPiece) return 0
-
-  const enemyColor = movedPiece.color === 'w' ? 'b' : 'w'
-  const ownColor = movedPiece.color
-  const enemyAttackerValue = getLeastAttackerValue(chessAfterMove, move.to, enemyColor)
-  if (enemyAttackerValue === null) return 0
-
-  const ownDefenderValue = getLeastAttackerValue(chessAfterMove, move.to, ownColor)
-  const movedPieceValue = move.promotion ? pieceValues[move.promotion] : pieceValues[movedPiece.type]
-
-  if (ownDefenderValue === null) return movedPieceValue + 120
-  if (enemyAttackerValue <= movedPieceValue && ownDefenderValue > enemyAttackerValue) return Math.round(movedPieceValue * 0.65)
-  if (enemyAttackerValue > movedPieceValue && ownDefenderValue > movedPieceValue) return Math.round(movedPieceValue * 0.45)
-  return 0
 }
 
 function getWeakestSkill(scores: Record<string, number>) {
