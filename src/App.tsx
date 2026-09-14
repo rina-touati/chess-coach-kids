@@ -1572,10 +1572,6 @@ function App() {
               {isSavingName ? 'שומר' : 'מתחילים'}
             </button>
           </form>
-          <div className="speech-bubble idea">
-            <Volume2 aria-hidden="true" />
-            <p>אחרי שנשמור שם, המאמן יפנה אליו בשם ויתחיל לבנות זיכרון למידה.</p>
-          </div>
         </section>
       </main>
     )
