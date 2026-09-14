@@ -27,6 +27,9 @@ type ServerMoveResponse = {
   fen: string
   text: string
   mood: CoachMood
+  source?: 'openai' | 'rules' | 'fallback'
+  gameId?: string
+  profile?: unknown
   playerMove: {
     from: string
     to: string
@@ -1124,102 +1127,19 @@ function App() {
     }
   }
 
-  async function updateCoachFromCloud(
-    fallbackMessage: CoachMessage,
-    nextGame: Chess,
-    playerMove: Move,
-    bestBeforeMove: MoveAnalysis | undefined,
-    playedAnalysis: MoveAnalysis | undefined,
-    nextMoveCount: number,
-    blackMove: Move | null,
-    lockLocalMessage = false,
-    engineContext?: {
-      beforeMove?: StockfishAnalysis | null
-      afterPlayerMove?: StockfishAnalysis | null
-      afterBlackMove?: StockfishAnalysis | null
-    },
-  ) {
-    const loss =
-      bestBeforeMove && playedAnalysis && Number.isFinite(bestBeforeMove.score) && Number.isFinite(playedAnalysis.score)
-        ? bestBeforeMove.score - playedAnalysis.score
-        : 0
-    try {
-      const response = await fetch(apiUrl('/api/coach'), {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'move',
-          localMessage: fallbackMessage.text,
-          fen: nextGame.fen(),
-          pgn: nextGame.pgn(),
-          moveCount: nextMoveCount,
-          gameId: cloudGameId,
-          childName,
-          move: {
-            from: playerMove.from,
-            to: playerMove.to,
-            san: playerMove.san,
-            color: 'w',
-          },
-          analysis: {
-            bestMove: engineContext?.beforeMove?.bestMove ?? (bestBeforeMove ? `${bestBeforeMove.move.from}${bestBeforeMove.move.to}` : undefined),
-            playedMove: `${playerMove.from}${playerMove.to}`,
-            bestScore: bestBeforeMove?.score,
-            playedScore: playedAnalysis?.score,
-            loss,
-            safetyPenalty: playedAnalysis?.safetyPenalty,
-            scoreLabel: formatScore(evaluateBoard(nextGame)),
-            stockfish: {
-              beforeMove: engineContext?.beforeMove ?? null,
-              afterPlayerMove: engineContext?.afterPlayerMove ?? null,
-              afterBlackMove: engineContext?.afterBlackMove ?? null,
-            },
-          },
-          gameStatus: {
-            isCheckmate: nextGame.isCheckmate(),
-            isDraw: nextGame.isDraw(),
-            isCheck: nextGame.isCheck(),
-            turn: nextGame.turn(),
-            winner: nextGame.isCheckmate() ? (nextGame.turn() === 'w' ? 'black' : 'white') : null,
-            blackMove: blackMove
-              ? {
-                  from: blackMove.from,
-                  to: blackMove.to,
-                  san: blackMove.san,
-                }
-              : null,
-          },
-        }),
-      })
-
-      if (!response.ok) throw new Error('Coach API failed')
-
-      const cloudMessage = (await response.json()) as Partial<CoachMessage> & { profile?: unknown }
-      const maybeGameId = (cloudMessage as { gameId?: unknown }).gameId
-      if (typeof maybeGameId === 'string') setCloudGameId(maybeGameId)
-      applyProfileUpdate(cloudMessage.profile)
-      // Move feedback must stay tied to the actual board and played move. The cloud
-      // call still records progress, but it cannot replace deterministic chess facts.
-      return
-    } catch {
-      if (!lockLocalMessage) {
-        updateCoach(fallbackMessage)
-      }
-    }
-  }
-
   async function applyServerMoveCoach(gameBeforeMove: Chess, playerMove: Move, nextMoveCount: number) {
     const response = await fetch(apiUrl('/api/move'), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fen: gameBeforeMove.fen(),
-        childName,
-        moveCount: nextMoveCount,
-        skillLevel: adaptiveEngineSkill,
-        lessonSkill: null,
+          fen: gameBeforeMove.fen(),
+          childName,
+          moveCount: nextMoveCount,
+          skillLevel: adaptiveEngineSkill,
+          gameId: cloudGameId,
+          mode: playMode,
+          lessonSkill: null,
         move: {
           from: playerMove.from,
           to: playerMove.to,
@@ -1231,6 +1151,8 @@ function App() {
     if (!response.ok) throw new Error('Server move coach failed')
     const result = (await response.json()) as ServerMoveResponse
     const serverGame = new Chess(result.fen)
+    if (result.gameId) setCloudGameId(result.gameId)
+    applyProfileUpdate(result.profile)
 
     setGame(serverGame)
     setLastMove(
@@ -1538,7 +1460,6 @@ function App() {
 
     let blackMove: Move | null = null
     let engineBeforeMove: StockfishAnalysis | null = null
-    let engineAfterPlayerMove: StockfishAnalysis | null = null
     let engineAfterBlackMove: StockfishAnalysis | null = null
     const nextGame = new Chess(afterPlayerMove.fen())
 
@@ -1548,7 +1469,6 @@ function App() {
         nextGame.isGameOver() ? Promise.resolve(null) : fetchStockfishAnalysis(nextGame, adaptiveEngineSkill, 380),
       ])
       engineBeforeMove = beforeResult
-      engineAfterPlayerMove = blackResult
 
       const stockfishBlackMove = moveFromUci(nextGame, blackResult?.bestMove ?? null)
       blackMove = stockfishBlackMove ?? (!nextGame.isGameOver() ? pickBlackMove(nextGame, adaptiveEngineSkill) : null)
@@ -1587,11 +1507,14 @@ function App() {
 
     updateCoach(message)
 
-    void updateCoachFromCloud(message, nextGame, playerMove, bestBeforeMove, playedAnalysis, nextMoveCount, blackMove, lockLocalMessage, {
-      beforeMove: engineBeforeMove,
-      afterPlayerMove: engineAfterPlayerMove,
-      afterBlackMove: engineAfterBlackMove,
-    })
+    if (!lockLocalMessage) {
+      applyProfileUpdate({
+        skillScores: {
+          ...skillScores,
+          focus: Math.max(1, Math.min(100, skillScores.focus + 1)),
+        },
+      })
+    }
   }
 
   async function showHint() {

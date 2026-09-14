@@ -15,7 +15,7 @@ import {
 type SkillKey = 'opening' | 'tactics' | 'safety' | 'endgame' | 'focus'
 
 type CoachRequest = {
-  event: 'move' | 'hint' | 'reset' | 'chat' | 'practice' | 'onboarding'
+  event: 'hint' | 'reset' | 'chat' | 'practice' | 'onboarding'
   localMessage: string
   fen: string
   pgn: string
@@ -31,25 +31,8 @@ type CoachRequest = {
     stage?: number
     solved?: boolean
   }
-  move?: {
-    from: string
-    to: string
-    san?: string
-    color: 'w' | 'b'
-  }
   analysis?: {
-    bestMove?: string
-    playedMove?: string
-    bestScore?: number
-    playedScore?: number
-    loss?: number
-    safetyPenalty?: number
     scoreLabel?: string
-    stockfish?: {
-      beforeMove?: unknown
-      afterPlayerMove?: unknown
-      afterBlackMove?: unknown
-    }
   }
   gameStatus?: {
     isCheckmate?: boolean
@@ -106,17 +89,10 @@ function getWeakestSkill(scores: Record<string, number>) {
 }
 
 function buildTrainingFocus(body: CoachRequest) {
-  const loss = body.analysis?.loss ?? 0
-  const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
   const tags: string[] = []
 
   if (body.gameStatus?.isCheckmate) tags.push('checkmate')
   if (body.gameStatus?.isCheck) tags.push('check')
-  if (loss > 500) tags.push('big_blunder')
-  else if (loss > 150) tags.push('inaccuracy')
-  if (safetyPenalty > 250) tags.push('piece_safety')
-  if (body.move?.san?.includes('x')) tags.push('capture')
-  if (body.move?.san?.includes('+')) tags.push('tactic')
   if ((body.moveCount ?? 0) <= 8) tags.push('opening')
   if ((body.moveCount ?? 0) >= 22) tags.push('endgame')
   if (body.event === 'practice') tags.push('practice')
@@ -147,12 +123,6 @@ function buildTrainingFocus(body: CoachRequest) {
   } else if (body.gameStatus?.isCheckmate) {
     topic = 'endgame'
     nextQuestion = 'אילו משבצות בריחה נשארו למלך?'
-  } else if (safetyPenalty > 250) {
-    topic = 'safety'
-    nextQuestion = 'האם הכלי שעבר יכול להיאכל בחינם?'
-  } else if (loss > 500 || body.move?.san?.includes('+') || body.move?.san?.includes('x')) {
-    topic = 'tactics'
-    nextQuestion = 'האם יש שח, לקיחה או איום חזק יותר?'
   } else if ((body.moveCount ?? 0) <= 8) {
     topic = 'opening'
     nextQuestion = 'איזה כלי קל כדאי לפתח למרכז?'
@@ -167,9 +137,7 @@ function buildTrainingFocus(body: CoachRequest) {
     tags,
     nextQuestion,
     practice: body.practice ?? null,
-    bestMove: body.analysis?.bestMove ?? null,
-    playedMove: body.analysis?.playedMove ?? null,
-    loss,
+    scoreLabel: body.analysis?.scoreLabel ?? null,
   }
 }
 
@@ -182,36 +150,17 @@ function updateSkillScores(current: Record<string, unknown>, body: CoachRequest)
     focus: clampSkill(current.focus),
   }
 
-  const loss = body.analysis?.loss ?? 0
-  const moveText = `${body.move?.from ?? ''}${body.move?.to ?? ''}`
-  const safetyPenalty = typeof body.analysis?.safetyPenalty === 'number' ? body.analysis.safetyPenalty : 0
-
   if (body.gameStatus?.isCheckmate && body.gameStatus.winner === 'black') {
     next.endgame -= 4
     next.safety -= 3
     next.focus -= 3
   }
 
-  if (loss > 250) {
-    next.focus -= 3
-    next.safety -= 2
-    next.tactics -= 2
-  } else if (loss > 120) {
-    next.focus -= 1
-  } else if (body.event === 'move') {
+  if (body.event === 'practice') {
+    const skill = body.practice?.skill ?? 'focus'
+    next[skill] += body.practice?.solved ? 2 : 1
+  } else if (body.event === 'chat' || body.event === 'hint') {
     next.focus += 1
-  }
-
-  if (/^[b-g][18][a-h][1-8]$/.test(moveText)) {
-    next.opening += 1
-  }
-
-  if (safetyPenalty > 250) {
-    next.safety -= 3
-  }
-
-  if (body.move?.san?.includes('x') || body.move?.san?.includes('+')) {
-    next.tactics += 1
   }
 
   return Object.fromEntries(Object.entries(next).map(([key, value]) => [key, clampSkill(value)]))
@@ -475,95 +424,6 @@ function getRuleBasedCoachMessage(body: CoachRequest): CoachResponse | null {
   return getPracticeRuleMessage(body)
 }
 
-function formatUciMove(move: string | undefined) {
-  if (!move || move.length < 4) return null
-  return 'מסע אחר'
-}
-
-function getPieceNameFromSan(san: string | undefined) {
-  const pieceLetter = san?.replace(/[+#?!x=]/g, '').trim()[0]
-  if (pieceLetter === 'N') return 'סוס'
-  if (pieceLetter === 'B') return 'רץ'
-  if (pieceLetter === 'R') return 'צריח'
-  if (pieceLetter === 'Q') return 'מלכה'
-  if (pieceLetter === 'K') return 'מלך'
-  return 'רגלי'
-}
-
-function getMoveRuleMessage(body: CoachRequest): CoachResponse {
-  const name = cleanCoachName(body.childName) || 'אלוף'
-  const move = body.move
-  const playedPiece = move ? getPieceNameFromSan(move.san) : 'הכלי'
-  const bestMove = formatUciMove(body.analysis?.bestMove)
-  const blackMove = body.gameStatus?.blackMove
-    ? getPieceNameFromSan(body.gameStatus.blackMove.san)
-    : null
-  const loss = body.analysis?.loss ?? 0
-  const safetyPenalty = body.analysis?.safetyPenalty ?? 0
-
-  if (body.gameStatus?.isCheck) {
-    return {
-      text: `${name}, השחור נתן שח${blackMove ? ` עם ${blackMove}` : ''}. כשהמלך בסכנה, קודם מצילים אותו. התקפה באה אחר כך.`,
-      mood: 'careful',
-      source: 'rules',
-    }
-  }
-
-  if (safetyPenalty > 250) {
-    return {
-      text: `${name}, ה${playedPiece} נשאר במקום מסוכן. לפני שמזיזים כלי, שואלים מי יכול לאכול אותו ומי שומר עליו.`,
-      mood: 'careful',
-      source: 'rules',
-    }
-  }
-
-  if (loss > 450 && bestMove) {
-    return {
-      text: `${name}, המסע חוקי, אבל היה רעיון חזק יותר. לפני המסע הבא בדוק שח, לקיחה ואיום.`,
-      mood: 'careful',
-      source: 'rules',
-    }
-  }
-
-  if (move?.san?.includes('x')) {
-    return {
-      text: `${name}, יפה, ה${playedPiece} לקח כלי. עכשיו בודקים אם הוא נשאר מוגן או שהשחור יכול לאכול אותו בחזרה.`,
-      mood: 'good',
-      source: 'rules',
-    }
-  }
-
-  if (move?.san?.includes('+')) {
-    return {
-      text: `${name}, נתת שח. זה אומר שהמלך השחור חייב לענות מיד. עכשיו נבדוק מה השחור יכול לעשות בחזרה.`,
-      mood: 'good',
-      source: 'rules',
-    }
-  }
-
-  if ((body.moveCount ?? 0) <= 8) {
-    return {
-      text: `${name}, זה מסע פתיחה. בתחילת המשחק מוציאים סוסים ורצים, תופסים את האמצע, ושומרים על המלך.`,
-      mood: 'idea',
-      source: 'rules',
-    }
-  }
-
-  if (bestMove) {
-    return {
-      text: `${name}, המסע חוקי. עכשיו כדאי לחפש רעיון פעיל: שח, לקיחה, או איום על כלי של השחור.`,
-      mood: 'idea',
-      source: 'rules',
-    }
-  }
-
-  return {
-    text: `${name}, המסע חוקי. לפני המסע הבא נעצור רגע ונשאל מה השחור מאיים ואיזה כלי שלי צריך שמירה.`,
-    mood: 'idea',
-    source: 'rules',
-  }
-}
-
 async function generateCoachMessage(body: CoachRequest, profile: Record<string, unknown>): Promise<CoachResponse> {
   const forcedMessage = getForcedGameStatusMessage(body)
   if (forcedMessage) return forcedMessage
@@ -571,16 +431,28 @@ async function generateCoachMessage(body: CoachRequest, profile: Record<string, 
   const ruleMessage = getRuleBasedCoachMessage(body)
   if (ruleMessage) return ruleMessage
 
-  if (body.event === 'move') {
-    return getMoveRuleMessage(body)
-  }
-
   const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY') })
   const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
   const trainingFocus = buildTrainingFocus(body)
 
   const response = await openai.responses.create({
     model,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'coach_message',
+        strict: true,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            text: { type: 'string' },
+            mood: { type: 'string', enum: ['good', 'careful', 'idea'] },
+          },
+          required: ['text', 'mood'],
+        },
+      },
+    },
     input: [
       {
         role: 'system',
@@ -627,7 +499,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   try {
     const body = parseJsonBody<CoachRequest>(req)
-    const { supabase, auth, profile } = await ensureProfile(req, res)
+    if ((body as { event?: string }).event === 'move') {
+      res.status(409).json({ error: 'Game moves are handled by /api/move so chess facts and coach text stay in one stream.' })
+      return
+    }
+
+    const { profile } = await ensureProfile(req, res)
 
     let coach: CoachResponse
     try {
@@ -635,7 +512,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     } catch {
       coach = {
         text: body.localMessage,
-        mood: body.analysis?.loss && body.analysis.loss > 150 ? 'careful' : 'idea',
+        mood: 'idea',
         source: 'fallback',
       }
     }
@@ -660,52 +537,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       },
     }
 
-    let row: { game_id?: string; profile?: unknown } | null = null
-
-    if (body.event === 'move' && body.move) {
-      const movePayload = {
-        ply: Math.max(1, body.moveCount),
-        color: body.move.color,
-        from: body.move.from,
-        to: body.move.to,
-        san: body.move.san,
-        fen_after: body.fen,
-        pgn: body.pgn,
-        status: body.gameStatus?.isCheckmate || body.gameStatus?.isDraw ? 'completed' : 'active',
-        result: body.gameStatus?.isCheckmate
-          ? body.gameStatus.winner === 'white'
-            ? 'white_win'
-            : 'black_win'
-          : body.gameStatus?.isDraw
-            ? 'draw'
-            : null,
-        analysis: {
-          ...(body.analysis ?? {}),
-          trainingFocus,
-          gameStatus: body.gameStatus ?? {},
-        },
-        coach_feedback: {
-          text: coach.text,
-          mood: coach.mood,
-          source: coach.source,
-        },
-      }
-
-      const { data: recorded } = await supabase.rpc('chess_record_move', {
-        p_child_profile_id: auth.childProfileId,
-        p_access_token: auth.accessToken,
-        p_game_id: body.gameId ?? null,
-        p_move: movePayload,
-        p_profile_patch: profilePatch,
-      })
-
-      row = Array.isArray(recorded) ? recorded[0] : null
-    }
-
     res.status(200).json({
       ...coach,
-      profile: normalizeProfile(row?.profile ?? profilePatch),
-      gameId: row?.game_id ?? body.gameId,
+      profile: normalizeProfile(profilePatch),
+      gameId: body.gameId,
     })
   } catch (error) {
     res.status(500).json({
