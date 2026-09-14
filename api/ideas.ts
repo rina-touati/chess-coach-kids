@@ -29,8 +29,8 @@ function getPhase(chess: Chess): PositionFacts['phase'] {
     return total + pieceValues[piece.type]
   }, 0)
 
-  if (chess.moveNumber() <= 8) return 'opening'
   if (pieces.length <= 10 || nonPawnMaterial <= 1800) return 'endgame'
+  if (chess.moveNumber() <= 8) return 'opening'
   return 'middlegame'
 }
 
