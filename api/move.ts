@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { Chess, type Move, type Square } from 'chess.js'
-import { pieceValues } from '../shared/chessSafety.js'
+import { getCaptureGainForSide, pieceValues } from '../shared/chessSafety.js'
 import {
   type ApiRequest,
   type ApiResponse,
@@ -278,6 +278,7 @@ function classifyOpponentCandidate(chess: Chess, uci: string | null) {
     return {
       move: null,
       isNeedlessCapture: false,
+      isRecapturableTrade: false,
       isDevelopmentMove: false,
       givesCheck: false,
     }
@@ -288,11 +289,16 @@ function classifyOpponentCandidate(chess: Chess, uci: string | null) {
   const givesCheck = move.san.includes('+') || move.san.includes('#')
   const isDevelopmentMove =
     (move.piece === 'n' || move.piece === 'b') && ['b8', 'g8', 'c8', 'f8'].includes(move.from)
-  const isNeedlessCapture = Boolean(move.captured && capturedValue <= moverValue && !givesCheck)
+  const afterMove = new Chess(chess.fen())
+  afterMove.move({ from: move.from, to: move.to, promotion: move.promotion ?? 'q' })
+  const recaptureGain = getCaptureGainForSide(afterMove, move.to as Square, 'w')
+  const isRecapturableTrade = Boolean(move.captured && !givesCheck && recaptureGain >= moverValue - 40)
+  const isNeedlessCapture = Boolean(move.captured && !givesCheck && (capturedValue <= moverValue || isRecapturableTrade))
 
   return {
     move,
     isNeedlessCapture,
+    isRecapturableTrade,
     isDevelopmentMove,
     givesCheck,
   }
