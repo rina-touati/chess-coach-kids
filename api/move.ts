@@ -92,9 +92,12 @@ function cleanCoachText(text: string) {
     .slice(0, 260)
 }
 
+const bannedCoachTerms = /פיצ'?ר|פיצ׳ר|שולחן|אסטרטגי|דינמיקה|קונספט|אופציה|סיטואציה/
+
 function getTextRejectionReason(text: string) {
   if (!text.trim()) return 'empty_text'
   if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return 'blocked_word'
+  if (bannedCoachTerms.test(text)) return 'jargon'
   return null
 }
 
@@ -491,7 +494,7 @@ async function phraseMoveWithOpenAi(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Use clean modern Hebrew only, one or two short sentences. Do not use English letters or chess notation like e4. Never invent board facts. Stockfish facts and legal move facts are binding. If mode is guided and the game continues, speak about what to check before the next move, not generic praise. If the child blundered or left a piece unsafe, be kind but direct. Do not shame.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child. The child cannot read, so every answer is spoken. Use clean modern Hebrew only, one or two short sentences. Do not use English letters or chess notation like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. Never invent board facts. Stockfish facts and legal move facts are binding. If mode is guided and the game continues, speak about what to check before the next move, not generic praise. If the child blundered or left a piece unsafe, be kind but direct. Do not shame.',
         },
         {
           role: 'user',

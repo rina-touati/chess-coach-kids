@@ -1,5 +1,5 @@
 import { Chess, type Square } from 'chess.js'
-import { getPieceValueOnSquare, isPieceHanging, pieceValues } from '../shared/chessSafety.js'
+import { getMoveSafetyPenalty, getPieceValueOnSquare, isPieceHanging, pieceValues } from '../shared/chessSafety.js'
 import type { StockfishLine } from './stockfish.js'
 
 export type PositionTheme =
@@ -34,8 +34,9 @@ function getPhase(chess: Chess): PositionFacts['phase'] {
   return 'middlegame'
 }
 
-function attacksAnySquare(chess: Chess, attackerSquare: Square, targets: Square[], attackerColor: 'w' | 'b') {
-  return targets.some((target) => chess.attackers(target, attackerColor).includes(attackerSquare))
+function attacksHigherValueTarget(chess: Chess, attackerSquare: Square, targets: Square[], attackerColor: 'w' | 'b') {
+  const attackerValue = getPieceValueOnSquare(chess, attackerSquare)
+  return targets.some((target) => chess.attackers(target, attackerColor).includes(attackerSquare) && getPieceValueOnSquare(chess, target) > attackerValue)
 }
 
 function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
@@ -46,12 +47,12 @@ function getMyHangingPieces(chess: Chess, myColor: 'w' | 'b', freeCaptures: Squa
       if (!piece || piece.color !== myColor || piece.type === 'k') continue
 
       const square = piece.square as Square
-      if (attacksAnySquare(chess, square, freeCaptures, myColor)) continue
+      if (attacksHigherValueTarget(chess, square, freeCaptures, myColor)) continue
       if (isPieceHanging(chess, square, myColor)) hanging.push(square)
     }
   }
 
-  return hanging
+  return hanging.sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
 }
 
 function getOpponentThreats(chess: Chess, myColor: 'w' | 'b', freeCaptures: Square[]) {
@@ -63,12 +64,12 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b', freeCaptures: Squa
     for (const row of chess.board()) {
       for (const piece of row) {
         if (!piece || piece.color !== myColor || piece.type === 'k') continue
-        if (attacksAnySquare(chess, piece.square as Square, freeCaptures, myColor)) continue
+        if (attacksHigherValueTarget(chess, piece.square as Square, freeCaptures, myColor)) continue
         if (isPieceHanging(chess, piece.square as Square, myColor)) legalThreats.add(piece.square as Square)
       }
     }
 
-    return [...legalThreats]
+    return [...legalThreats].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
   }
 
   const threats = new Set<Square>()
@@ -76,30 +77,43 @@ function getOpponentThreats(chess: Chess, myColor: 'w' | 'b', freeCaptures: Squa
     if (
       move.captured &&
       move.color === enemy &&
-      !attacksAnySquare(chess, move.to as Square, freeCaptures, myColor) &&
+      !attacksHigherValueTarget(chess, move.to as Square, freeCaptures, myColor) &&
       isPieceHanging(chess, move.to as Square, myColor)
     ) {
       threats.add(move.to as Square)
     }
   }
 
-  return [...threats]
+  return [...threats].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
 }
 
 function getFreeCaptures(chess: Chess, myColor: 'w' | 'b') {
-  const enemyColor = myColor === 'w' ? 'b' : 'w'
-  const freeCaptures = new Set<Square>()
+  const captureScores = new Map<Square, number>()
 
-  for (const row of chess.board()) {
-    for (const piece of row) {
-      if (!piece || piece.color !== enemyColor || piece.type === 'k') continue
+  for (const move of chess.moves({ verbose: true })) {
+    if (move.color !== myColor || !move.captured) continue
 
-      const square = piece.square as Square
-      if (isPieceHanging(chess, square, enemyColor)) freeCaptures.add(square)
-    }
+    const afterCapture = new Chess(chess.fen())
+    afterCapture.move({
+      from: move.from as Square,
+      to: move.to as Square,
+      promotion: move.promotion ?? 'q',
+    })
+
+    const capturedValue = pieceValues[move.captured]
+    const safetyPenalty = getMoveSafetyPenalty(afterCapture, move)
+    const netGain = capturedValue - safetyPenalty
+
+    if (netGain <= 0) continue
+
+    const target = move.to as Square
+    const previousScore = captureScores.get(target) ?? -Infinity
+    captureScores.set(target, Math.max(previousScore, netGain))
   }
 
-  return [...freeCaptures].sort((a, b) => getPieceValueOnSquare(chess, b) - getPieceValueOnSquare(chess, a))
+  return [...captureScores.entries()]
+    .sort((a, b) => b[1] - a[1] || getPieceValueOnSquare(chess, b[0]) - getPieceValueOnSquare(chess, a[0]))
+    .map(([square]) => square)
 }
 
 function classifyEngineMove(chess: Chess, uci: string) {

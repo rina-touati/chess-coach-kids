@@ -21,6 +21,7 @@ type GuidanceResponse = {
 
 const fallbackGuidance = 'עצור רגע — מה היריב מאיים, ואיזה כלי שלך לא מוגן?'
 const captureFallbackGuidance = 'עצור רגע — יש כלי של היריב שאפשר לקחת בבטחה. איזה כלי נשאר בלי הגנה?'
+const bannedCoachTerms = /פיצ'?ר|פיצ׳ר|שולחן|אסטרטגי|דינמיקה|קונספט|אופציה|סיטואציה/
 
 const pieceNames: Record<PieceSymbol, string> = {
   p: 'רגלי',
@@ -65,14 +66,20 @@ function isCleanGuidanceText(rawText: string, text: string, primaryFreeCapturePi
   if (!text.trim()) return false
   if (/[A-Za-z]/.test(rawText)) return false
   if (/חמור|טיפש|גרוע|לא מבין/.test(text)) return false
+  if (bannedCoachTerms.test(text)) return false
   if (/[a-h][1-8]/i.test(rawText)) return false
   if (/רעיון טוב עכשיו/.test(text)) return false
+  if ((facts.theme === 'defend_hanging' || facts.theme === 'escape_threat') && /(לקחת|לתפוס|לאכול).{0,18}(של היריב|יריב|שחור)/.test(text)) return false
   if (facts.theme === 'capture_free' && primaryFreeCapturePiece && !text.includes(primaryFreeCapturePiece)) return false
   return true
 }
 
-function getFallbackText(facts?: ReturnType<typeof describePosition>) {
-  return facts?.theme === 'capture_free' ? captureFallbackGuidance : fallbackGuidance
+function getFallbackText(facts?: ReturnType<typeof describePosition>, threatenedPieces: string[] = []) {
+  if (facts?.theme === 'capture_free') return captureFallbackGuidance
+  if ((facts?.theme === 'defend_hanging' || facts?.theme === 'escape_threat') && threatenedPieces[0]) {
+    return `${threatenedPieces[0]} שלך בסכנה. קודם מצילים אותו, ורק אחר כך חושבים על לקיחות.`
+  }
+  return fallbackGuidance
 }
 
 function getPiecesOnSquares(chess: Chess, squares: Square[]) {
@@ -86,13 +93,16 @@ async function phraseGuidance(args: {
   engineLines: Awaited<ReturnType<typeof analyzePosition>>['lines']
   weakestSkill?: string
 }): Promise<GuidanceResponse> {
+  const threatenedSquares = args.facts.myHangingPieces.length > 0 ? args.facts.myHangingPieces : args.facts.opponentThreats
+  const threatenedPieces = getPiecesOnSquares(args.chess, threatenedSquares)
+  const shouldMentionCapture = args.facts.theme === 'capture_free'
+  const factsForPrompt = shouldMentionCapture ? args.facts : { ...args.facts, freeCaptures: [] }
+  const freeCapturePieces = shouldMentionCapture ? getPiecesOnSquares(args.chess, args.facts.freeCaptures) : []
+  const primaryFreeCapturePiece = freeCapturePieces[0] ?? null
+
   try {
     const openai = new OpenAI({ apiKey: getRequiredEnv('OPENAI_API_KEY'), fetch: nativeFetch })
     const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini'
-    const threatenedSquares = args.facts.myHangingPieces.length > 0 ? args.facts.myHangingPieces : args.facts.opponentThreats
-    const threatenedPieces = getPiecesOnSquares(args.chess, threatenedSquares)
-    const freeCapturePieces = getPiecesOnSquares(args.chess, args.facts.freeCaptures)
-    const primaryFreeCapturePiece = freeCapturePieces[0] ?? null
 
     const response = await openai.responses.create({
       model,
@@ -116,7 +126,7 @@ async function phraseGuidance(args: {
         {
           role: 'system',
           content:
-            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. Talk only about the current board position and the child’s next move. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. If the current position is stable, give a short plan for what to check now. Never use English letters, chess notation, or square names like e4. Never reveal the exact best move. Do not name a piece because of engineLines. You may name a piece only if it appears in threatenedPieces or freeCapturePieces, because that comes from current board facts. If facts.theme is capture_free, guide the child to notice that an opponent piece can be taken, without naming a square or exact move; never recommend defending in that case. In capture_free, if primaryFreeCapturePiece is not null, mention exactly that piece and do not mention another capturable piece. If facts.theme is defend_hanging or escape_threat, mention the threatened piece when available, guide the child to notice it is in danger, and ask what protects it; never talk about development or center first. If there is an active threat, it is more important than developing a piece. Give direction, not the answer.',
+            'Return exactly one JSON object and nothing else, with keys "text" and "mood". You are a warm Hebrew-speaking chess coach for a 6-year-old child before the child makes a move. Use spoken modern Hebrew only, one or two short sentences. Talk only about the current board position and the child’s next move. Never describe past exchanges, never say why an opponent captured something earlier, and never ask the child to protect a piece that is no longer on the board. If the current position is stable, give a short plan for what to check now. Never use English letters, chess notation, or square names like e4. Never use product or abstract jargon such as פיצ׳ר, אסטרטגי, קונספט, אופציה, סיטואציה, דינמיקה, and never call the chess board שולחן; say לוח. Never reveal the exact best move. Do not name a piece because of engineLines. You may name a piece only if it appears in threatenedPieces or freeCapturePieces, because that comes from current board facts. If facts.theme is defend_hanging or escape_threat, mention the threatened piece when available, guide the child to notice it is in danger, and ask what protects it; do not mention captures or opponent pawns in this case. If facts.theme is capture_free, guide the child to notice that an opponent piece can be taken, without naming a square or exact move; never recommend defending in that case. In capture_free, if primaryFreeCapturePiece is not null, mention exactly that piece and do not mention another capturable piece. If there is an active threat, it is more important than developing a piece or taking a pawn. Give direction, not the answer.',
         },
         {
           role: 'user',
@@ -124,7 +134,7 @@ async function phraseGuidance(args: {
             childName: args.childName,
             turn: args.chess.turn(),
             currentFen: args.chess.fen(),
-            facts: args.facts,
+            facts: factsForPrompt,
             threatenedPieces,
             freeCapturePieces,
             primaryFreeCapturePiece,
@@ -151,12 +161,12 @@ async function phraseGuidance(args: {
     const mood = parsed?.mood === 'good' || parsed?.mood === 'careful' || parsed?.mood === 'idea' ? parsed.mood : 'idea'
 
     if (!isCleanGuidanceText(rawText, text, primaryFreeCapturePiece, args.facts)) {
-      return { text: getFallbackText(args.facts), mood: 'idea', source: 'fallback', facts: args.facts }
+      return { text: getFallbackText(args.facts, threatenedPieces), mood: 'idea', source: 'fallback', facts: args.facts }
     }
 
     return { text, mood, source: 'openai', facts: args.facts }
   } catch {
-    return { text: getFallbackText(args.facts), mood: 'idea', source: 'fallback', facts: args.facts }
+    return { text: getFallbackText(args.facts, threatenedPieces), mood: 'idea', source: 'fallback', facts: args.facts }
   }
 }
 
