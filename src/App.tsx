@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Chess, type Move, type Square } from 'chess.js'
 import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard'
 import { Lightbulb, Mic, Play, Target, Volume2 } from 'lucide-react'
@@ -880,6 +880,7 @@ function App() {
   const [nameDraft, setNameDraft] = useState('')
   const [isSavingName, setIsSavingName] = useState(false)
   const [game, setGame] = useState(() => new Chess())
+  const currentGameFenRef = useRef(game.fen())
   const [coach, setCoach] = useState<CoachMessage>({
     mood: 'idea',
     text: 'שלום. קודם נגיד לי איך קוראים לילד, ואז נתחיל להתאמן.',
@@ -915,6 +916,12 @@ function App() {
         ? 'לפני כל מסע המאמן נותן כיוון קצר, ואז הילד מחליט לבד.'
         : activePracticePlan.question)
   const lessonButtonLabel = lastCompletedPuzzle && !activePuzzle ? 'שיעור הבא' : 'שיעור'
+
+  function commitGame(nextGame: Chess) {
+    currentGameFenRef.current = nextGame.fen()
+    setGame(nextGame)
+  }
+
   useEffect(() => {
     let isMounted = true
 
@@ -1104,7 +1111,7 @@ function App() {
     if (result.gameId) setCloudGameId(result.gameId)
     applyProfileUpdate(result.profile)
 
-    setGame(serverGame)
+    commitGame(serverGame)
     setLastMove(
       result.blackMove
         ? `${result.playerMove.from} אל ${result.playerMove.to}; השחור: ${result.blackMove.from} אל ${result.blackMove.to}`
@@ -1215,7 +1222,7 @@ function App() {
     const puzzleGame = new Chess(puzzle.fen)
     setActivePuzzle({ puzzle, stage: 0 })
     setLastCompletedPuzzle(null)
-    setGame(puzzleGame)
+    commitGame(puzzleGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
     setLastMove(getPuzzleMoveCountLabel(puzzle, 0))
@@ -1227,7 +1234,7 @@ function App() {
   }
 
   function completePracticePuzzle(nextGame: Chess, puzzle: PracticePuzzle, playerMove: Move, stage: number) {
-    setGame(nextGame)
+    commitGame(nextGame)
     setActivePuzzle(null)
     setLastCompletedPuzzle(puzzle)
     setSessionSolvedPuzzleIds((current) => (current.includes(puzzle.id) ? current : [...current, puzzle.id]))
@@ -1293,7 +1300,7 @@ function App() {
       return true
     }
 
-    setGame(nextGame)
+    commitGame(nextGame)
     setActivePuzzle({ puzzle: activePuzzle.puzzle, stage: nextStage })
     setLastMove('המסע הראשון נכון')
     setHighlightedSquares({
@@ -1376,7 +1383,7 @@ function App() {
       [playerMove.to]: { background: '#86efac' },
     })
 
-    setGame(nextGame)
+    commitGame(nextGame)
     setCoach({
       mood: 'idea',
       text: 'בודק את המסע לפי הלוח ומנוע השחמט.',
@@ -1397,9 +1404,11 @@ function App() {
       const serverResult = await applyServerMoveCoach(gameBeforeMove, playerMove, nextMoveCount)
       if (playMode === 'guided' && !serverResult.serverGame.isGameOver() && serverResult.serverGame.turn() === 'w') {
         try {
-          updateCoach(await requestPreMoveGuidance(serverResult.serverGame))
+          const guidanceFen = serverResult.serverGame.fen()
+          const guidance = await requestPreMoveGuidance(serverResult.serverGame)
+          if (currentGameFenRef.current === guidanceFen) updateCoach(guidance)
         } catch {
-          updateCoach(getGenericPreMoveGuidance())
+          if (currentGameFenRef.current === serverResult.serverGame.fen()) updateCoach(getGenericPreMoveGuidance())
         }
       }
       return
@@ -1429,6 +1438,8 @@ function App() {
       setLastMove(`${playerMove.from} אל ${playerMove.to}; השחור: ${blackMove.from} אל ${blackMove.to}`)
     }
 
+    commitGame(nextGame)
+
     const terminalMessage = getGameOverMessage(nextGame, childName)
     const lockLocalMessage = Boolean(terminalMessage)
     const localFeedback = getConcreteMoveFeedback(
@@ -1445,13 +1456,15 @@ function App() {
     let message = terminalMessage ?? localFeedback
     if (!terminalMessage && playMode === 'guided' && nextGame.turn() === 'w') {
       try {
-        message = await requestPreMoveGuidance(nextGame)
+        const guidanceFen = nextGame.fen()
+        const guidance = await requestPreMoveGuidance(nextGame)
+        if (currentGameFenRef.current !== guidanceFen) return
+        message = guidance
       } catch {
+        if (currentGameFenRef.current !== nextGame.fen()) return
         message = getGenericPreMoveGuidance()
       }
     }
-
-    setGame(nextGame)
 
     updateCoach(message)
 
@@ -1507,7 +1520,7 @@ function App() {
     setPlayMode(nextMode)
     setActivePuzzle(null)
     setLastCompletedPuzzle(null)
-    setGame(freshGame)
+    commitGame(freshGame)
     setMovesPlayed(0)
     setCloudGameId(undefined)
     setLastMove('עוד לא התחיל')
